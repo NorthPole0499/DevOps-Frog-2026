@@ -18,3 +18,7 @@ service:
   port: 8000
 
 containerPort: 8000
+
+env:
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: "http://jaeger.monitoring.svc.cluster.local:4317"

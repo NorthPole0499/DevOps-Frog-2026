@@ -1,0 +1,31 @@
+jaeger:
+  enabled: true
+  replicas: 1
+
+  userconfig: |
+    service:
+      extensions: [jaeger_query]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          exporters: [jaeger_storage_exporter]
+
+    extensions:
+      jaeger_query:
+        storage:
+          traces: memory
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    exporters:
+      jaeger_storage_exporter:
+        trace_storage: memory
+
+storage:
+  type: none
