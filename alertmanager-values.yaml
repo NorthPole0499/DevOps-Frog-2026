@@ -1,0 +1,29 @@
+alertmanager:
+  config:
+    global: {}
+
+    route:
+      group_by:
+        - namespace
+        - alertname
+      group_wait: 10s
+      group_interval: 30s
+      repeat_interval: 1h
+      receiver: "null"
+
+      routes:
+        - receiver: "api-webhook"
+          matchers:
+            - severity = "critical"
+
+        - receiver: "null"
+          matchers:
+            - alertname = "Watchdog"
+
+    receivers:
+      - name: "null"
+
+      - name: "api-webhook"
+        webhook_configs:
+          - url: "http://alert-webhook.monitoring.svc.cluster.local:8080/"
+            send_resolved: true
