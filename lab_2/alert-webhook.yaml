@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alert-webhook
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alert-webhook
+  template:
+    metadata:
+      labels:
+        app: alert-webhook
+    spec:
+      containers:
+        - name: webhook
+          image: python:3.12-alpine
+          command:
+            - python
+            - -c
+            - |
+              from http.server import BaseHTTPRequestHandler, HTTPServer
+              import sys
+
+              class Handler(BaseHTTPRequestHandler):
+                  def do_POST(self):
+                      length = int(self.headers.get("Content-Length", 0))
+                      body = self.rfile.read(length)
+                      print("=== ALERTMANAGER WEBHOOK ===", flush=True)
+                      print(body.decode("utf-8"), flush=True)
+                      self.send_response(200)
+                      self.end_headers()
+                      self.wfile.write(b"OK")
+
+                  def log_message(self, format, *args):
+                      return
+
+              HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+          ports:
+            - containerPort: 8080
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alert-webhook
+  namespace: monitoring
+spec:
+  selector:
+    app: alert-webhook
+  ports:
+    - port: 8080
+      targetPort: 8080

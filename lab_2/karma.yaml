@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: karma
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: karma
+  template:
+    metadata:
+      labels:
+        app: karma
+    spec:
+      containers:
+        - name: karma
+          image: ghcr.io/prymitive/karma:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ALERTMANAGER_URI
+              value: "http://monitoring-kube-prometheus-alertmanager.monitoring.svc.cluster.local:9093"
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: karma
+  namespace: monitoring
+spec:
+  selector:
+    app: karma
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
