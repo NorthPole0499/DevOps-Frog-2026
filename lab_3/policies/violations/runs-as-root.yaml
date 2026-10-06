@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: runs-as-root
+  labels:
+    app.kubernetes.io/name: runs-as-root
+    team: shop
+spec:
+  containers:
+    - name: app
+      image: registry.shop.local/shop/api:1.0
+      resources:
+        limits:
+          cpu: 100m
+          memory: 64Mi

@@ -1,0 +1,27 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-image-registry
+spec:
+  background: false
+  rules:
+    - name: trusted-registry-only
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          - resources:
+              namespaces: [kube-system, kube-public, kube-node-lease, kyverno]
+      validate:
+        failureAction: Enforce
+        message: "Образ должен быть из доверенного реестра: registry.shop.local/ или ghcr.io/cloudnative-pg/"
+        pattern:
+          spec:
+            =(ephemeralContainers):
+              - image: "registry.shop.local/* | ghcr.io/cloudnative-pg/*"
+            =(initContainers):
+              - image: "registry.shop.local/* | ghcr.io/cloudnative-pg/*"
+            containers:
+              - image: "registry.shop.local/* | ghcr.io/cloudnative-pg/*"

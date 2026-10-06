@@ -1,0 +1,17 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: shop-postgres
+  labels:
+    {{- include "shop.labels" (dict "root" . "name" "postgres") | nindent 4 }}
+spec:
+  instances: {{ .Values.postgres.instances }}
+  inheritedMetadata:
+    labels:
+      app.kubernetes.io/name: postgres
+      app.kubernetes.io/part-of: shop
+      team: {{ .Values.team | quote }}
+  storage:
+    size: {{ .Values.postgres.storage.size }}
+  resources:
+    {{- toYaml .Values.postgres.resources | nindent 4 }}

@@ -1,0 +1,40 @@
+team: shop
+
+api:
+  replicas: 5
+  image:
+    repository: registry.shop.local/shop/api
+    tag: "0.2.0"
+    pullPolicy: IfNotPresent
+  healthFail: false
+  preStopSleepSeconds: 5
+  terminationGracePeriodSeconds: 30
+  resources:
+    requests: {cpu: 50m, memory: 96Mi}
+    limits: {cpu: 300m, memory: 192Mi}
+
+worker:
+  replicas: 2
+  image:
+    repository: registry.shop.local/shop/worker
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  healthFail: false
+  resources:
+    requests: {cpu: 25m, memory: 48Mi}
+    limits: {cpu: 150m, memory: 96Mi}
+
+postgres:
+  instances: 1
+  storage:
+    size: 1Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+
+db:
+  host: shop-postgres-rw
+  port: "5432"
+  name: app
+  user: app
+  passwordSecret: shop-postgres-app
