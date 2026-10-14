@@ -23,3 +23,39 @@ team: {{ .root.Values.team | quote }}
       key: password
       optional: true
 {{- end }}
+
+{{- define "shop.spread" -}}
+{{- $s := .spread -}}
+{{- $selector := include "shop.selectorLabels" (dict "root" .root "name" .name) -}}
+{{- if eq $s.mode "topologySpreadConstraints" -}}
+topologySpreadConstraints:
+  - maxSkew: {{ $s.maxSkew }}
+    topologyKey: {{ $s.topologyKey }}
+    whenUnsatisfiable: {{ ternary "DoNotSchedule" "ScheduleAnyway" $s.strict }}
+    nodeTaintsPolicy: Honor
+    matchLabelKeys: [pod-template-hash]
+    labelSelector:
+      matchLabels:
+        {{- $selector | nindent 8 }}
+{{- else if eq $s.mode "podAntiAffinity" -}}
+affinity:
+  podAntiAffinity:
+    {{- if $s.strict }}
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - topologyKey: {{ $s.topologyKey }}
+        labelSelector:
+          matchLabels:
+            {{- $selector | nindent 12 }}
+    {{- else }}
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          topologyKey: {{ $s.topologyKey }}
+          labelSelector:
+            matchLabels:
+              {{- $selector | nindent 14 }}
+    {{- end }}
+{{- else if ne $s.mode "none" }}
+{{- fail (printf "%s.spread.mode: unknown value %q (expected topologySpreadConstraints, podAntiAffinity or none)" .name $s.mode) }}
+{{- end }}
+{{- end }}

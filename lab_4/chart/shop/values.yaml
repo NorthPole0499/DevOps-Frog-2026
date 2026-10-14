@@ -9,6 +9,11 @@ api:
   healthFail: false
   preStopSleepSeconds: 5
   terminationGracePeriodSeconds: 30
+  spread:
+    mode: topologySpreadConstraints
+    topologyKey: kubernetes.io/hostname
+    strict: true
+    maxSkew: 1
   resources:
     requests: {cpu: 50m, memory: 96Mi}
     limits: {cpu: 300m, memory: 192Mi}

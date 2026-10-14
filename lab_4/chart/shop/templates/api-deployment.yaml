@@ -23,6 +23,7 @@ spec:
         runAsNonRoot: true
         runAsUser: 10001
       terminationGracePeriodSeconds: {{ .Values.api.terminationGracePeriodSeconds }}
+      {{- include "shop.spread" (dict "root" . "name" "api" "spread" .Values.api.spread) | nindent 6 }}
       containers:
         - name: api
           image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
