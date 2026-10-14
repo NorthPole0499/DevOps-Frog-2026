@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: batch
+  labels:
+    {{- include "shop.labels" (dict "root" . "name" "batch") | nindent 4 }}
+spec:
+  replicas: {{ .Values.batch.replicas }}
+  selector:
+    matchLabels:
+      {{- include "shop.selectorLabels" (dict "root" . "name" "batch") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "shop.labels" (dict "root" . "name" "batch") | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      terminationGracePeriodSeconds: {{ .Values.batch.terminationGracePeriodSeconds }}
+      containers:
+        - name: batch
+          image: "{{ .Values.batch.image.repository }}:{{ .Values.batch.image.tag }}"
+          imagePullPolicy: {{ .Values.batch.image.pullPolicy }}
+          env:
+            - {name: MEMORY_MB, value: {{ .Values.batch.load.memoryMb | quote }}}
+            - {name: CPU_WORKERS, value: {{ .Values.batch.load.cpuWorkers | quote }}}
+          resources:
+            {{- toYaml .Values.batch.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}

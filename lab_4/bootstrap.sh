@@ -2,8 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-PROFILE="${MINIKUBE_PROFILE:-minikube}"
+PROFILE="${MINIKUBE_PROFILE:-lab4}"
 K8S_VERSION="v1.35.1"
+NODES="${NODES:-2}"
+NODE_MEMORY="${NODE_MEMORY:-2560}"
+NODE_CPUS="${NODE_CPUS:-3}"
 REGISTRY="registry.shop.local/shop"
 KYVERNO_CHART_VERSION="3.9.1"
 CNPG_CHART_VERSION="0.29.1"
@@ -22,14 +25,18 @@ values_tag() {
   ' "${VALUES}"
 }
 
-step "Кластер minikube (профиль ${PROFILE})"
+step "Кластер minikube (профиль ${PROFILE}, ${NODES} ноды по ${NODE_MEMORY} МБ / ${NODE_CPUS} CPU)"
 if mk status --format '{{.APIServer}}' 2>/dev/null | grep -q Running; then
   echo "уже запущен"
 else
-  mk start --memory=4608 --cpus=4 --kubernetes-version="${K8S_VERSION}"
+  mk start --nodes="${NODES}" --memory="${NODE_MEMORY}" --cpus="${NODE_CPUS}" --kubernetes-version="${K8S_VERSION}"
 fi
 kubectl config use-context "${PROFILE}" >/dev/null
-kubectl get nodes
+mk addons enable volumesnapshots
+mk addons enable csi-hostpath-driver
+mk addons enable metrics-server
+kubectl get nodes -o wide
+kubectl get storageclass
 
 step "Kyverno (chart ${KYVERNO_CHART_VERSION})"
 helm repo add kyverno https://kyverno.github.io/kyverno/ >/dev/null 2>&1 || true
@@ -80,11 +87,15 @@ if [ "${SKIP_MONITORING:-0}" != "1" ]; then
 fi
 
 if [ "${SKIP_IMAGES:-0}" != "1" ]; then
-  api_versions="$(printf '%s\n' "$(values_tag api)" 0.1.0 0.2.0 ${APP_VERSION:-} | sort -u)"
-  worker_versions="$(printf '%s\n' "$(values_tag worker)" ${APP_VERSION:-} | sort -u)"
-  step "Образы: api [$(echo ${api_versions})], worker [$(echo ${worker_versions})]"
-  for v in ${api_versions};    do svc=api;    docker build -q -t "${REGISTRY}/${svc}:${v}" --build-arg APP_VERSION="${v}" "${ROOT}/services/${svc}"; mk image load "${REGISTRY}/${svc}:${v}"; done
-  for v in ${worker_versions}; do svc=worker; docker build -q -t "${REGISTRY}/${svc}:${v}" --build-arg APP_VERSION="${v}" "${ROOT}/services/${svc}"; mk image load "${REGISTRY}/${svc}:${v}"; done
+  for svc in api worker batch; do
+    versions="$(printf '%s\n' "$(values_tag "${svc}")" ${APP_VERSION:-} | sort -u)"
+    [ "${svc}" = api ] && versions="$(printf '%s\n' ${versions} 0.1.0 0.2.0 | sort -u)"
+    step "Образы ${svc}: [$(echo ${versions})]"
+    for v in ${versions}; do
+      docker build -q -t "${REGISTRY}/${svc}:${v}" --build-arg APP_VERSION="${v}" "${ROOT}/services/${svc}"
+      mk image load "${REGISTRY}/${svc}:${v}"
+    done
+  done
   mk image ls | grep "${REGISTRY}" | sort || true
 fi
 
@@ -95,6 +106,7 @@ if [ "${SKIP_SHOP:-0}" != "1" ]; then
   kubectl wait --for=condition=Ready cluster/shop-postgres -n shop --timeout=600s
   kubectl rollout status -n shop deploy/api --timeout=300s
   kubectl rollout status -n shop deploy/worker --timeout=300s
+  kubectl rollout status -n shop deploy/batch --timeout=300s
 
   if ! kubectl exec -n shop deploy/api -- sh -c 'test -n "$DB_PASSWORD"' 2>/dev/null; then
     echo "Поды стартовали раньше Secret с паролем БД — rollout restart api/worker"
@@ -128,5 +140,7 @@ kubectl get clusterpolicy
 kubectl get policyexception -n kyverno
 [ "${SKIP_MONITORING:-0}" != "1" ] && kubectl get pods -n monitoring
 if [ "${SKIP_SHOP:-0}" != "1" ]; then
-  kubectl get cluster,pods -n shop
+  kubectl get cluster -n shop
+  kubectl get pods -n shop -o wide
 fi
+kubectl describe nodes | grep -A8 "Allocated resources"

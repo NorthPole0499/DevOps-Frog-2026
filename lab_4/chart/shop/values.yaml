@@ -29,10 +29,25 @@ worker:
     requests: {cpu: 25m, memory: 48Mi}
     limits: {cpu: 150m, memory: 96Mi}
 
+batch:
+  replicas: 1
+  image:
+    repository: registry.shop.local/shop/batch
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  terminationGracePeriodSeconds: 5
+  load:
+    memoryMb: 200
+    cpuWorkers: 1
+  resources:
+    requests: {cpu: 250m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 384Mi}
+
 postgres:
   instances: 1
   storage:
     size: 1Gi
+    storageClass: csi-hostpath-sc
   resources:
     requests: {cpu: 100m, memory: 256Mi}
     limits: {cpu: 500m, memory: 512Mi}
