@@ -7,6 +7,8 @@ K8S_VERSION="v1.35.1"
 REGISTRY="registry.shop.local/shop"
 KYVERNO_CHART_VERSION="3.9.1"
 CNPG_CHART_VERSION="0.29.1"
+KPS_CHART_VERSION="91.5.2"
+LAB2="${ROOT}/../lab_2"
 VALUES="${ROOT}/chart/shop/values.yaml"
 
 step() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
@@ -59,6 +61,24 @@ helm upgrade --install cnpg cnpg/cloudnative-pg \
   -f "${ROOT}/platform/cnpg-values.yaml"
 kubectl rollout status -n cnpg-system deploy/cnpg-cloudnative-pg --timeout=180s
 
+if [ "${SKIP_MONITORING:-0}" != "1" ]; then
+  step "Мониторинг из Лабы 2 (kube-prometheus-stack ${KPS_CHART_VERSION})"
+  kubectl apply -f "${ROOT}/policies/exceptions/"
+  sleep 5
+  helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null 2>&1 || true
+  helm repo update prometheus-community >/dev/null
+  helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+    --version "${KPS_CHART_VERSION}" \
+    -n monitoring --create-namespace \
+    -f "${LAB2}/monitoring-default-values.yaml" \
+    -f "${LAB2}/alertmanager-values.yaml" \
+    -f "${ROOT}/platform/monitoring-values.yaml" \
+    --wait --timeout 10m
+  kubectl rollout status -n monitoring statefulset/prometheus-monitoring-kube-prometheus-prometheus --timeout=300s
+  kubectl apply -f "${ROOT}/platform/alert-webhook.yaml"
+  kubectl rollout status -n monitoring deploy/alert-webhook --timeout=180s
+fi
+
 if [ "${SKIP_IMAGES:-0}" != "1" ]; then
   api_versions="$(printf '%s\n' "$(values_tag api)" 0.1.0 0.2.0 ${APP_VERSION:-} | sort -u)"
   worker_versions="$(printf '%s\n' "$(values_tag worker)" ${APP_VERSION:-} | sort -u)"
@@ -70,7 +90,7 @@ fi
 
 if [ "${SKIP_SHOP:-0}" != "1" ]; then
   step "Чарт shop"
-  helm upgrade --install shop "${ROOT}/chart/shop" -n shop --create-namespace
+  helm upgrade --install shop "${ROOT}/chart/shop" -n shop --create-namespace --reset-values
   echo "Ждём, пока оператор поднимет Postgres (при первой установке — пара минут)..."
   kubectl wait --for=condition=Ready cluster/shop-postgres -n shop --timeout=600s
   kubectl rollout status -n shop deploy/api --timeout=300s
@@ -105,6 +125,8 @@ step "Готово"
 kubectl get pods -n kyverno
 kubectl get pods -n cnpg-system
 kubectl get clusterpolicy
+kubectl get policyexception -n kyverno
+[ "${SKIP_MONITORING:-0}" != "1" ] && kubectl get pods -n monitoring
 if [ "${SKIP_SHOP:-0}" != "1" ]; then
   kubectl get cluster,pods -n shop
 fi

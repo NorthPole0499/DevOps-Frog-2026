@@ -1,0 +1,22 @@
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: monitoring-stack-registry
+  namespace: kyverno
+spec:
+  exceptions:
+    - policyName: restrict-image-registry
+      ruleNames:
+        - trusted-registry-only
+        - autogen-trusted-registry-only
+  match:
+    any:
+      - resources:
+          kinds: [Pod, Deployment, ReplicaSet, DaemonSet, StatefulSet, Job]
+          namespaces: [monitoring]
+          names:
+            - "monitoring-*"
+            - "prometheus-monitoring-*"
+            - "alertmanager-monitoring-*"
+            - "alert-webhook"
+            - "alert-webhook-*"

@@ -1,0 +1,21 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: shop
+  labels:
+    {{- include "shop.labels" (dict "root" . "name" "shop") | nindent 4 }}
+    release: {{ .Values.monitoring.releaseLabel | quote }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/part-of: shop
+    matchExpressions:
+      - {key: app.kubernetes.io/name, operator: In, values: [api, worker]}
+  jobLabel: app.kubernetes.io/name
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.monitoring.interval }}
+{{- end }}

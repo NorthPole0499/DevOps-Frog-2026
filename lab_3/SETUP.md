@@ -2,8 +2,6 @@
 
 Платформа для `shop` на локальном minikube: ограждения Kyverno, Helm-чарт `api`/`worker`, Postgres через оператор CloudNativePG. Всё поднимается одним скриптом.
 
-> Отчёт (`README.md`) и мониторинг (Часть 5 лабы) ещё в работе — см. «Статус».
-
 ## Статус
 
 | Часть лабы | Что | Готово |
@@ -13,8 +11,8 @@
 | 2 | Чарт `shop`, reconciliation, rolling update без потерь, откат сломанного релиза | ✅ |
 | 3 | Postgres через CloudNativePG (`Cluster` в чарте) | ✅ |
 | 4 | Падение control plane | ✅ (сценарий ниже) |
-| 5 | Мониторинг: `ServiceMonitor` / `PrometheusRule`, 3 алерта | ⏳ |
-| — | `README.md` с отчётом и скриншотами | ⏳ |
+| 5 | Мониторинг: стек Лабы 2 рядом с Kyverno (`PolicyException`) | ✅ |
+| 5 | Мониторинг: `ServiceMonitor` / `PrometheusRule`, 3 алерта, дашборд | ✅ |
 
 ## Требования
 
@@ -42,6 +40,7 @@ cd lab3-shop
 2. **Kyverno** — только admission-контроллер; `PolicyException` разрешены лишь в namespace `kyverno`.
 3. **Политики** из `policies/`.
 4. **Оператор CloudNativePG** — с values из `platform/cnpg-values.yaml`, чтобы он сам проходил политики.
+   **Мониторинг из Лабы 2** — `kube-prometheus-stack` 91.5.2 с values из `../lab_2/` плюс оверлей `platform/monitoring-values.yaml` (метки и лимиты) и `PolicyException` из `policies/exceptions/` (только правило реестра, только релиз `monitoring`), плюс `platform/alert-webhook.yaml` — receiver из Лабы 2 для `severity=critical`.
 5. **Образы** `api` (теги из `values.yaml` + `0.1.0`/`0.2.0` для демо) и `worker` — собираются локально и грузятся в minikube. Реестр `registry.shop.local` фиктивный: образ уже лежит на ноде, kubelet никуда не ходит.
 6. **Чарт `shop`** в namespace `shop` + проверка, что поды получили пароль БД, + smoke-тест.
 
@@ -51,6 +50,7 @@ cd lab3-shop
 |---|---|
 | `SKIP_IMAGES=1` | не пересобирать образы |
 | `SKIP_SHOP=1` | только платформа (без чарта `shop`) |
+| `SKIP_MONITORING=1` | не ставить стек мониторинга |
 | `APP_VERSION=0.3.0` | дополнительно собрать образы этой версии |
 | `MINIKUBE_PROFILE=lab3` | отдельный профиль minikube вместо `minikube` |
 
@@ -63,10 +63,20 @@ lab3-shop/
 ├── bootstrap.sh              — поднять всё
 ├── services/api, worker/     — подопытные сервисы (Python) + Dockerfile
 ├── policies/                 — 5 политик Kyverno (ClusterPolicy)
-│   └── violations/           — 5 манифестов, каждый нарушает ровно одно правило
+│   ├── violations/           — 5 манифестов, каждый нарушает ровно одно правило
+│   └── exceptions/           — PolicyException для стека мониторинга (только реестр)
 ├── platform/cnpg-values.yaml — values оператора CNPG под наши политики
-├── chart/shop/               — Helm-чарт: api, worker, Service'ы, Cluster (Postgres)
-└── scripts/hit-api.sh        — нагрузка на api через Service изнутри кластера
+├── platform/monitoring-values.yaml — оверлей к values Лабы 2: метки и лимиты под политики
+├── platform/alert-webhook.yaml — receiver Alertmanager из Лабы 2, доведённый до политик
+├── chart/shop/               — Helm-чарт: api, worker, Service'ы, Cluster (Postgres),
+│   │                           ServiceMonitor, PrometheusRule, ConfigMap с дашбордом
+│   └── dashboards/           — JSON дашборда Grafana
+├── tests/alerts.test.yaml    — unit-тесты алертов (promtool)
+├── img/monitoring/           — скриншоты Части 5
+└── scripts/
+    ├── hit-api.sh            — нагрузка /health + /version (Часть 2)
+    ├── order-load.sh         — поток заказов (Часть 5); RATE=заказов/с
+    └── test-alerts.sh        — promtool test rules по правилам из чарта
 ```
 
 ## Сценарии лабы
@@ -96,7 +106,7 @@ helm template shop chart/shop -n shop --set api.resources.limits=null | kubectl 
 ```
 
 - **Удаление пода:** `kubectl delete pod -n shop <api-pod>` — ReplicaSet создаёт замену.
-- **Rolling update:** поменять `api.image.tag` в `chart/shop/values.yaml` (`0.1.0` ↔ `0.2.0`) → `helm upgrade shop chart/shop -n shop`. Поды меняются по одному (`maxSurge: 1`, `maxUnavailable: 0`), в `hit-api.sh` — `fail=0` благодаря `preStop: sleep`.
+- **Rolling update:** поменять `api.image.tag` в `chart/shop/values.yaml` (`0.2.0` ↔ `0.3.0`) → `helm upgrade shop chart/shop -n shop --reset-values`. Поды меняются по одному (`maxSurge: 1`, `maxUnavailable: 0`), в `hit-api.sh` — `fail=0` благодаря `preStop: sleep`.
 - **Сломанный релиз:** `api.healthFail: true` → `helm upgrade`. Helm говорит `deployed`, но `kubectl rollout status deploy/api -n shop` зависает: новый под не проходит readiness, старые живы, сервис отвечает.
 - **Откат:** `helm history shop -n shop` → `helm rollback shop <последняя исправная> -n shop`. **Потом вернуть `healthFail: false` в `values.yaml`**, иначе следующий `helm upgrade` закатит поломку снова.
 
@@ -135,6 +145,24 @@ minikube ssh -- sudo mv /etc/kubernetes/manifests/etcd.yaml /etc/kubernetes/etcd
 minikube ssh -- sudo mv /etc/kubernetes/etcd.yaml.stopped /etc/kubernetes/manifests/etcd.yaml
 ```
 
+### Часть 5 — мониторинг
+
+Доступ (каждое в своём терминале):
+
+```bash
+kubectl port-forward -n monitoring svc/monitoring-kube-prometheus-prometheus 9090:9090
+kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80
+kubectl port-forward -n monitoring svc/monitoring-kube-prometheus-alertmanager 9093:9093
+kubectl get secret -n monitoring monitoring-grafana -o jsonpath='{.data.admin-password}' | base64 -d; echo
+```
+
+- Таргеты: http://localhost:9090/targets?search=shop — `serviceMonitor/shop/shop/0`, 7/7 `up`.
+- Дашборд: http://localhost:3000/d/shop-overview.
+- Unit-тесты алертов: `./scripts/test-alerts.sh` (нужен Docker).
+- Нагрузка: `./scripts/order-load.sh` (держать открытым).
+- **`ShopOrdersNotProcessed`** (warning): `kubectl scale deploy/worker -n shop --replicas=0` → `pending` через ~5 мин (окно `[5m]`), `firing` ещё через 2. Вернуть: `kubectl scale deploy/worker -n shop --replicas=2`.
+- **`ShopApiHighErrorRatio`** (critical, уходит в `alert-webhook`): `kubectl annotate cluster shop-postgres -n shop cnpg.io/hibernation=on --overwrite` → `firing` через ~3 мин; смотреть `kubectl logs -n monitoring deploy/alert-webhook`. Вернуть: `...hibernation=off --overwrite`, затем снять аннотацию `cnpg.io/hibernation-`.
+
 ## Ежедневная работа
 
 - Выключать — `minikube stop`, включать — `minikube start`. Всё (политики, релизы, база, образы) сохраняется.
@@ -151,10 +179,14 @@ minikube ssh -- sudo mv /etc/kubernetes/etcd.yaml.stopped /etc/kubernetes/manife
 | `kubectl` отвечает `connection refused` на `localhost:8080` | minikube остановлен, контекст сброшен | `minikube start` |
 | поды в `Pending`, `Insufficient memory` | мало памяти у Docker / кластера | Docker Desktop ≥ 6 ГБ; закрыть тяжёлые приложения |
 | `Cluster` долго `Setting up primary` | первый раз качается образ Postgres (~4–5 мин) | подождать; `kubectl get events -n shop` |
+| `helm upgrade` говорит `deployed`, но правка `values.yaml` не применилась | без `-f`/`--set` Helm переиспользует values прошлой ревизии (например, после `helm rollback`) | `helm upgrade ... --reset-values`; проверить `helm get values shop -n shop` → `null` |
+| таргетов `shop` нет в Prometheus | у `ServiceMonitor` нет метки `release: monitoring` или стек не установлен | `kubectl get servicemonitor -n shop --show-labels`; `SKIP_MONITORING` не выставлен |
+| `monitoring-grafana` в `OOMKilled` | лимит памяти мал для ~30 дашбордов стека | лимит в `platform/monitoring-values.yaml` (сейчас 768Mi) |
 
 ## Известные компромиссы
 
 - Kyverno в **одной** реплике (ради памяти): при аварийном падении с `failurePolicy: Fail` блокируется создание подов, включая самовосстановление.
 - `kyverno.io/v1 ClusterPolicy` в Kyverno 1.19 помечен deprecated (замена — `ValidatingPolicy` на CEL); работает, отсюда предупреждения в выводе.
 - Postgres в **одном** инстансе: при удалении/перезапуске пода база недоступна несколько минут.
+- Стек мониторинга берёт образы с quay.io/docker.io/registry.k8s.io по `PolicyException`, а не через зеркало в `registry.shop.local` — подробности в README, Часть 5.
 - `ghcr.io/cloudnative-pg/*` разрешён политикой реестра на весь кластер — доверие всей организации на GHCR, а не конкретным образам.

@@ -4,7 +4,7 @@ api:
   replicas: 5
   image:
     repository: registry.shop.local/shop/api
-    tag: "0.2.0"
+    tag: "0.3.0"
     pullPolicy: IfNotPresent
   healthFail: false
   preStopSleepSeconds: 5
@@ -38,3 +38,15 @@ db:
   name: app
   user: app
   passwordSecret: shop-postgres-app
+
+monitoring:
+  enabled: true
+  releaseLabel: monitoring
+  interval: 15s
+  dashboard: true
+  alerts:
+    apiErrorRatio: 0.05
+    apiErrorRatioFor: 2m
+    apiDownFor: 1m
+    ordersStuckWindow: 5m
+    ordersStuckFor: 2m
