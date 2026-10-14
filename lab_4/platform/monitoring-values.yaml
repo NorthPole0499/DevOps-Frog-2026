@@ -36,6 +36,7 @@ alertmanager:
       limits: {cpu: 100m, memory: 128Mi}
 
 grafana:
+  defaultDashboardsEnabled: false
   podLabels:
     team: monitoring
   resources:

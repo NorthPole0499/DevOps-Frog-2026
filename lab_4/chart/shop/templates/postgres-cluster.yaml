@@ -13,8 +13,5 @@ spec:
       team: {{ .Values.team | quote }}
   storage:
     size: {{ .Values.postgres.storage.size }}
-    {{- with .Values.postgres.storage.storageClass }}
-    storageClass: {{ . }}
-    {{- end }}
   resources:
     {{- toYaml .Values.postgres.resources | nindent 4 }}

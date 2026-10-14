@@ -13,7 +13,7 @@ spec:
       exclude:
         any:
           - resources:
-              namespaces: [kube-system, kube-public, kube-node-lease, kyverno]
+              namespaces: [kube-system, kube-public, kube-node-lease, kyverno, local-path-storage]
       validate:
         failureAction: Enforce
         message: "Образ должен быть из доверенного реестра: registry.shop.local/ или ghcr.io/cloudnative-pg/"

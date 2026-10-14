@@ -2,20 +2,54 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-PROFILE="${MINIKUBE_PROFILE:-lab4}"
-K8S_VERSION="v1.35.1"
-NODES="${NODES:-2}"
-NODE_MEMORY="${NODE_MEMORY:-2560}"
+CLUSTER="${CLUSTER:-lab4}"
+NODE_IMAGE="kindest/node:v1.35.1"
 NODE_CPUS="${NODE_CPUS:-3}"
+CP_MEMORY="${CP_MEMORY:-3072}"
+CP_RESERVED_MEMORY="${CP_RESERVED_MEMORY:-2048}"
+WORKER_MEMORY="${WORKER_MEMORY:-2560}"
+WORKER_RESERVED_MEMORY="${WORKER_RESERVED_MEMORY:-512}"
 REGISTRY="registry.shop.local/shop"
 KYVERNO_CHART_VERSION="3.9.1"
 CNPG_CHART_VERSION="0.29.1"
 KPS_CHART_VERSION="91.5.2"
+METRICS_SERVER_CHART_VERSION="3.14.0"
 LAB2="${ROOT}/../lab_2"
 VALUES="${ROOT}/chart/shop/values.yaml"
 
 step() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
-mk() { minikube -p "${PROFILE}" "$@"; }
+
+kubelet_args() {
+  cat <<EOF
+          kubeletExtraArgs:
+            system-reserved: "cpu=${reserved_cpus},memory=${2}Mi"
+            eviction-hard: "memory.available<$(( host_memory - $1 ))Mi,nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%"
+            enforce-node-allocatable: "none"
+EOF
+}
+
+kind_config() {
+  cat <<EOF
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    image: ${NODE_IMAGE}
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          taints: []
+$(kubelet_args "${CP_MEMORY}" "${CP_RESERVED_MEMORY}")
+  - role: worker
+    image: ${NODE_IMAGE}
+    kubeadmConfigPatches:
+      - |
+        kind: JoinConfiguration
+        nodeRegistration:
+$(kubelet_args "${WORKER_MEMORY}" "${WORKER_RESERVED_MEMORY}")
+EOF
+}
 
 values_tag() {
   awk -v svc="$1" '
@@ -25,18 +59,29 @@ values_tag() {
   ' "${VALUES}"
 }
 
-step "Кластер minikube (профиль ${PROFILE}, ${NODES} ноды по ${NODE_MEMORY} МБ / ${NODE_CPUS} CPU)"
-if mk status --format '{{.APIServer}}' 2>/dev/null | grep -q Running; then
-  echo "уже запущен"
+step "Кластер kind ${CLUSTER}: control-plane ${CP_MEMORY} МБ, worker ${WORKER_MEMORY} МБ, по ${NODE_CPUS} CPU"
+if kind get clusters 2>/dev/null | grep -qx "${CLUSTER}"; then
+  echo "уже есть"
 else
-  mk start --nodes="${NODES}" --memory="${NODE_MEMORY}" --cpus="${NODE_CPUS}" --kubernetes-version="${K8S_VERSION}"
+  host_memory=$(( $(docker info --format '{{.MemTotal}}') / 1048576 ))
+  reserved_cpus=$(( $(docker info --format '{{.NCPU}}') - NODE_CPUS ))
+  if [ $(( CP_MEMORY + WORKER_MEMORY )) -ge "${host_memory}" ]; then
+    echo "бюджеты нод (${CP_MEMORY} + ${WORKER_MEMORY} МБ) не помещаются в Docker VM (${host_memory} МБ)"; exit 1
+  fi
+  kind_config > "${ROOT}/platform/kind.generated.yaml"
+  kind create cluster --name "${CLUSTER}" --config "${ROOT}/platform/kind.generated.yaml"
 fi
-kubectl config use-context "${PROFILE}" >/dev/null
-mk addons enable volumesnapshots
-mk addons enable csi-hostpath-driver
-mk addons enable metrics-server
+kubectl config use-context "kind-${CLUSTER}" >/dev/null
 kubectl get nodes -o wide
-kubectl get storageclass
+kubectl get nodes -o custom-columns='NAME:.metadata.name,CAPACITY:.status.capacity.memory,ALLOCATABLE:.status.allocatable.memory,CPU:.status.allocatable.cpu,TAINTS:.spec.taints[*].key'
+
+step "metrics-server (chart ${METRICS_SERVER_CHART_VERSION})"
+helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/ >/dev/null 2>&1 || true
+helm repo update metrics-server >/dev/null
+helm upgrade --install metrics-server metrics-server/metrics-server \
+  --version "${METRICS_SERVER_CHART_VERSION}" \
+  -n kube-system \
+  --set 'args={--kubelet-insecure-tls}'
 
 step "Kyverno (chart ${KYVERNO_CHART_VERSION})"
 helm repo add kyverno https://kyverno.github.io/kyverno/ >/dev/null 2>&1 || true
@@ -49,7 +94,7 @@ helm upgrade --install kyverno kyverno/kyverno \
   --set reportsController.enabled=false \
   --set features.policyExceptions.enabled=true \
   --set features.policyExceptions.namespace=kyverno
-kubectl rollout status -n kyverno deploy/kyverno-admission-controller --timeout=180s
+kubectl rollout status -n kyverno deploy/kyverno-admission-controller --timeout=600s
 
 step "Политики"
 for i in $(seq 1 12); do
@@ -66,7 +111,7 @@ helm upgrade --install cnpg cnpg/cloudnative-pg \
   --version "${CNPG_CHART_VERSION}" \
   -n cnpg-system --create-namespace \
   -f "${ROOT}/platform/cnpg-values.yaml"
-kubectl rollout status -n cnpg-system deploy/cnpg-cloudnative-pg --timeout=180s
+kubectl rollout status -n cnpg-system deploy/cnpg-cloudnative-pg --timeout=600s
 
 if [ "${SKIP_MONITORING:-0}" != "1" ]; then
   step "Мониторинг из Лабы 2 (kube-prometheus-stack ${KPS_CHART_VERSION})"
@@ -93,15 +138,17 @@ if [ "${SKIP_IMAGES:-0}" != "1" ]; then
     step "Образы ${svc}: [$(echo ${versions})]"
     for v in ${versions}; do
       docker build -q -t "${REGISTRY}/${svc}:${v}" --build-arg APP_VERSION="${v}" "${ROOT}/services/${svc}"
-      mk image load "${REGISTRY}/${svc}:${v}"
+      kind load docker-image --name "${CLUSTER}" "${REGISTRY}/${svc}:${v}"
     done
   done
-  mk image ls | grep "${REGISTRY}" | sort || true
+  docker exec "${CLUSTER}-worker" crictl images | grep "${REGISTRY}" | sort || true
 fi
 
 if [ "${SKIP_SHOP:-0}" != "1" ]; then
   step "Чарт shop"
-  helm upgrade --install shop "${ROOT}/chart/shop" -n shop --create-namespace --reset-values
+  shop_args=()
+  [ "${SKIP_MONITORING:-0}" = "1" ] && shop_args+=(--set monitoring.enabled=false)
+  helm upgrade --install shop "${ROOT}/chart/shop" -n shop --create-namespace --reset-values ${shop_args[@]+"${shop_args[@]}"}
   echo "Ждём, пока оператор поднимет Postgres (при первой установке — пара минут)..."
   kubectl wait --for=condition=Ready cluster/shop-postgres -n shop --timeout=600s
   kubectl rollout status -n shop deploy/api --timeout=300s
@@ -143,4 +190,5 @@ if [ "${SKIP_SHOP:-0}" != "1" ]; then
   kubectl get cluster -n shop
   kubectl get pods -n shop -o wide
 fi
-kubectl describe nodes | grep -A8 "Allocated resources"
+kubectl describe nodes | grep -E "^Name:|^  (cpu|memory) "
+kubectl top nodes

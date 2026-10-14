@@ -13,7 +13,7 @@ spec:
       exclude:
         any:
           - resources:
-              namespaces: [kube-system, kube-public, kube-node-lease, kyverno]
+              namespaces: [kube-system, kube-public, kube-node-lease, kyverno, local-path-storage]
       validate:
         failureAction: Enforce
         message: "Нужны метки app.kubernetes.io/name и team (непустые)"

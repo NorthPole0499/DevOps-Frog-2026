@@ -47,7 +47,6 @@ postgres:
   instances: 1
   storage:
     size: 1Gi
-    storageClass: csi-hostpath-sc
   resources:
     requests: {cpu: 100m, memory: 256Mi}
     limits: {cpu: 500m, memory: 512Mi}
