@@ -1,0 +1,28 @@
+                                                                                                                                                                                    
+Simple Strategy                                                                                                                                                                     
+                                                                                                                                                                                    
+CPU request: 95.0% percentile, limit: unset                                                                                                                                         
+Memory request: max + 15.0%, limit: max + 15.0%                                                                                                                                     
+History: 1.0 hours                                                                                                                                                                  
+Step: 1.0 minutes                                                                                                                                                                   
+                                                                                                                                                                                    
+All parameters can be customized. For example: `krr simple --cpu_percentile=90 --memory_buffer_percentage=15 --history_duration=24 --timeframe_duration=0.5`                        
+                                                                                                                                                                                    
+This strategy does not work with objects with HPA defined (Horizontal Pod Autoscaler).                                                                                              
+If HPA is defined for CPU or Memory, the strategy will return "?" for that resource.                                                                                                
+You can override this behaviour by passing the --allow-hpa flag                                                                                                                     
+                                                                                                                                                                                    
+Learn more: https://github.com/robusta-dev/krr#algorithm                                                                                                                            
+                                                                                                                                                                                    
+┏━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━┳━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┓
+┃ Number ┃ Namespace ┃ Name   ┃ Pods ┃ Old Pods ┃ Type       ┃ Container ┃ CPU Diff ┃ CPU Requests         ┃ CPU Limits    ┃ Memory Diff ┃ Memory Requests        ┃ Memory Limits  ┃
+┡━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━╇━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━┩
+│     1. │ shop      │ api    │ 3    │ 0        │ Deployment │ api       │ +62m     │ (+20m) 50m -> 71m    │ 300m -> unset │ -63Mi       │ (-21Mi) 96Mi -> 75Mi   │ 192Mi -> 75Mi  │
+│        │           │        │      │          │            │           │ (3 pods) │                      │               │ (3 pods)    │                        │                │
+├────────┼───────────┼────────┼──────┼──────────┼────────────┼───────────┼──────────┼──────────────────────┼───────────────┼─────────────┼────────────────────────┼────────────────┤
+│     2. │ shop      │ batch  │ 1    │ 0        │ Deployment │ batch     │ +251m    │ (+251m) 250m -> 501m │ 500m -> unset │ -16Mi       │ (-16Mi) 256Mi -> 240Mi │ 384Mi -> 240Mi │
+├────────┼───────────┼────────┼──────┼──────────┼────────────┼───────────┼──────────┼──────────────────────┼───────────────┼─────────────┼────────────────────────┼────────────────┤
+│     3. │ shop      │ worker │ 2    │ 0        │ Deployment │ worker    │ -30m     │ (-15m) 25m -> 10m    │ 150m -> unset │ -22Mi       │ (-11Mi) 48Mi -> 37Mi   │ 96Mi -> 37Mi   │
+│        │           │        │      │          │            │           │ (2 pods) │                      │               │ (2 pods)    │                        │                │
+└────────┴───────────┴────────┴──────┴──────────┴────────────┴───────────┴──────────┴──────────────────────┴───────────────┴─────────────┴────────────────────────┴────────────────┘
+                                                                                   30 points - D                                                                                    

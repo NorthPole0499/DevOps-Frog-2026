@@ -1,0 +1,3 @@
+postgres (CNPG Cluster, krr его не видит; тот же алгоритм simple через PromQL)
+  CPU p95 = 174m -> request 174m, limit: нет
+  memory max = 105Mi -> request = limit = 121Mi

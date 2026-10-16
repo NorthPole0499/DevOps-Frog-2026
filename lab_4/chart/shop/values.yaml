@@ -15,8 +15,8 @@ api:
     strict: true
     maxSkew: 1
   resources:
-    requests: {cpu: 50m, memory: 96Mi}
-    limits: {cpu: 300m, memory: 192Mi}
+    requests: {cpu: 71m, memory: 75Mi}
+    limits: {cpu: 300m, memory: 75Mi}
 
 worker:
   replicas: 2
@@ -26,8 +26,8 @@ worker:
     pullPolicy: IfNotPresent
   healthFail: false
   resources:
-    requests: {cpu: 25m, memory: 48Mi}
-    limits: {cpu: 150m, memory: 96Mi}
+    requests: {cpu: 10m, memory: 37Mi}
+    limits: {cpu: 150m, memory: 37Mi}
 
 batch:
   replicas: 1
@@ -48,8 +48,8 @@ postgres:
   storage:
     size: 1Gi
   resources:
-    requests: {cpu: 100m, memory: 256Mi}
-    limits: {cpu: 500m, memory: 512Mi}
+    requests: {cpu: 174m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 256Mi}
 
 db:
   host: shop-postgres-rw

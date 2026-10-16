@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-exec kubectl exec -n shop deploy/worker -- python -u -c "
+exec "$(dirname "$0")/py-in-cluster.sh" "
 import urllib.request as u, json, time
 ok = fail = 0
 while True:

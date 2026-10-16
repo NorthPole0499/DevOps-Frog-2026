@@ -1,0 +1,38 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: order-load
+  namespace: shop
+  labels: {app.kubernetes.io/name: order-load, app.kubernetes.io/part-of: shop-load, team: shop}
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: order-load, app.kubernetes.io/part-of: shop-load, team: shop}
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 12345
+      containers:
+        - name: k6
+          image: registry.shop.local/tools/k6:1.3.0
+          imagePullPolicy: IfNotPresent
+          args: [run, --summary-trend-stats, "avg,p(50),p(95),p(99),max", /scripts/order-load.js]
+          env:
+            - {name: PROFILE, value: "${PROFILE}"}
+            - {name: PEAK_RPS, value: "${PEAK_RPS}"}
+            - {name: STEP_MINUTES, value: "${STEP_MINUTES}"}
+          resources:
+            requests: {cpu: 100m, memory: 64Mi}
+            limits: {cpu: "1", memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts}
+      volumes:
+        - name: scripts
+          configMap:
+            name: order-load

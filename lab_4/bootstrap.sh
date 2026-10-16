@@ -163,7 +163,7 @@ if [ "${SKIP_SHOP:-0}" != "1" ]; then
   fi
 
   step "Smoke-тест: заказ через api -> postgres -> worker"
-  kubectl exec -n shop deploy/worker -- python -c "
+  "${ROOT}/scripts/py-in-cluster.sh" "
 import urllib.request as u, json, time
 req = u.Request('http://api:8080/order', data=json.dumps({'item': 'bootstrap-check'}).encode(),
                 headers={'Content-Type': 'application/json'})
