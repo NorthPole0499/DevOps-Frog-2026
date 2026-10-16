@@ -1,5 +1,15 @@
 team: shop
 
+priorityClasses:
+  critical:
+    value: 1000000
+    preemptionPolicy: PreemptLowerPriority
+    description: "Критический путь заказа (api, postgres): вытесняет менее важные поды"
+  batch-low:
+    value: -1000
+    preemptionPolicy: Never
+    description: "Фоновая нагрузка: ниже всех подов без класса, никого не вытесняет"
+
 api:
   replicas: 3
   image:
@@ -14,8 +24,12 @@ api:
     topologyKey: kubernetes.io/hostname
     strict: true
     maxSkew: 1
+  priorityClass: critical
+  pdb:
+    enabled: true
+    maxUnavailable: 1
   resources:
-    requests: {cpu: 71m, memory: 75Mi}
+    requests: {cpu: 300m, memory: 75Mi}
     limits: {cpu: 300m, memory: 75Mi}
 
 worker:
@@ -25,6 +39,7 @@ worker:
     tag: "0.1.0"
     pullPolicy: IfNotPresent
   healthFail: false
+  priorityClass: ""
   resources:
     requests: {cpu: 10m, memory: 37Mi}
     limits: {cpu: 150m, memory: 37Mi}
@@ -36,19 +51,23 @@ batch:
     tag: "0.1.0"
     pullPolicy: IfNotPresent
   terminationGracePeriodSeconds: 5
+  priorityClass: batch-low
   load:
     memoryMb: 200
     cpuWorkers: 1
   resources:
-    requests: {cpu: 250m, memory: 256Mi}
+    requests: {cpu: 100m, memory: 128Mi}
     limits: {cpu: 500m, memory: 384Mi}
 
 postgres:
   instances: 1
   storage:
     size: 1Gi
+  priorityClass: critical
+  pdb:
+    enabled: true
   resources:
-    requests: {cpu: 174m, memory: 256Mi}
+    requests: {cpu: 500m, memory: 256Mi}
     limits: {cpu: 500m, memory: 256Mi}
 
 db:

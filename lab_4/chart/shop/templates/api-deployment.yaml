@@ -19,6 +19,7 @@ spec:
       labels:
         {{- include "shop.labels" (dict "root" . "name" "api") | nindent 8 }}
     spec:
+      {{- with include "shop.priorityClassName" (dict "root" . "name" "api" "key" .Values.api.priorityClass) }}{{ . | nindent 6 }}{{- end }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001

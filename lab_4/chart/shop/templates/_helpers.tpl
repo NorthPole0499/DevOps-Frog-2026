@@ -59,3 +59,12 @@ affinity:
 {{- fail (printf "%s.spread.mode: unknown value %q (expected topologySpreadConstraints, podAntiAffinity or none)" .name $s.mode) }}
 {{- end }}
 {{- end }}
+
+{{- define "shop.priorityClassName" -}}
+{{- with .key -}}
+{{- if not (hasKey $.root.Values.priorityClasses .) -}}
+{{- fail (printf "%s.priorityClass: unknown %q (expected one of %s)" $.name . (keys $.root.Values.priorityClasses | sortAlpha | join ", ")) -}}
+{{- end -}}
+priorityClassName: {{ printf "%s-%s" $.root.Release.Name . }}
+{{- end -}}
+{{- end }}

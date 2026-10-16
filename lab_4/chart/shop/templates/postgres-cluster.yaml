@@ -6,6 +6,8 @@ metadata:
     {{- include "shop.labels" (dict "root" . "name" "postgres") | nindent 4 }}
 spec:
   instances: {{ .Values.postgres.instances }}
+  {{- with include "shop.priorityClassName" (dict "root" . "name" "postgres" "key" .Values.postgres.priorityClass) }}{{ . | nindent 2 }}{{- end }}
+  enablePDB: {{ .Values.postgres.pdb.enabled }}
   inheritedMetadata:
     labels:
       app.kubernetes.io/name: postgres
