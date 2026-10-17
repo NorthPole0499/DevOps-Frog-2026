@@ -84,8 +84,8 @@ monitoring:
   interval: 15s
   dashboard: true
   alerts:
-    apiErrorRatio: 0.05
-    apiErrorRatioFor: 2m
-    apiDownFor: 1m
-    ordersStuckWindow: 5m
-    ordersStuckFor: 2m
+    sloLatencySeconds: 0.1
+    sloLatencyFor: 2m
+    sloErrorRatio: 0.01
+    sloErrorFor: 2m
+    restartsWindow: 15m
