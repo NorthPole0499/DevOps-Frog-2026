@@ -1,0 +1,81 @@
+{{- if .Values.monitoring.enabled }}
+{{- $a := .Values.monitoring.alerts }}
+{{- $ns := .Release.Namespace }}
+{{- $order := printf "namespace=\"%s\", job=\"api\", path=\"/order\"" $ns }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: shop
+  labels:
+    {{- include "shop.labels" (dict "root" . "name" "shop") | nindent 4 }}
+    release: {{ .Values.monitoring.releaseLabel | quote }}
+spec:
+  groups:
+    - name: shop.rules
+      rules:
+        - record: shop:api_http_error_ratio:rate2m
+          expr: |
+            (sum(rate(http_requests_total{namespace="{{ $ns }}", job="api", path!~"/health|/metrics", status=~"5.."}[2m])) or on() vector(0))
+            /
+            sum(rate(http_requests_total{namespace="{{ $ns }}", job="api", path!~"/health|/metrics"}[2m]))
+
+        - record: shop:order_latency_p95:rate5m
+          expr: |
+            histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{ {{- $order -}} }[5m])))
+
+        - record: shop:order_error_ratio:rate5m
+          expr: |
+            (sum(rate(http_requests_total{ {{- $order -}}, status=~"5.."}[5m])) or on() vector(0))
+            /
+            sum(rate(http_requests_total{ {{- $order -}} }[5m]))
+
+    - name: shop.slo
+      rules:
+        - alert: ShopOrderLatencySLOBreach
+          expr: shop:order_latency_p95:rate5m > {{ $a.sloLatencySeconds }}
+          for: {{ $a.sloLatencyFor }}
+          labels:
+            severity: warning
+            service: api
+            namespace: {{ $ns }}
+          annotations:
+            summary: "SLA по задержке нарушен: p95 POST /order = {{`{{ $value | humanizeDuration }}`}}"
+            description: >-
+              p95 создания заказа за 5 минут выше {{ mulf $a.sloLatencySeconds 1000 }} мс дольше {{ $a.sloLatencyFor }}.
+              Заказы проходят, но медленно. Частые причины: CPU-троттлинг postgres или api
+              (панель «CPU: доля троттлинга»), сосед по CPU (batch), медленная база.
+              Дашборд: /d/shop-overview, строка «SLA под перегрузкой».
+
+        - alert: ShopOrderErrorSLOBreach
+          expr: |
+            shop:order_error_ratio:rate5m > {{ $a.sloErrorRatio }}
+            or
+            absent(up{namespace="{{ $ns }}", job="api"} == 1)
+          for: {{ $a.sloErrorFor }}
+          labels:
+            severity: critical
+            service: api
+            namespace: {{ $ns }}
+          annotations:
+            summary: "SLA по ошибкам нарушен: заказы не создаются ({{`{{ $value | humanizePercentage }}`}})"
+            description: >-
+              Больше {{ mulf $a.sloErrorRatio 100 }}% POST /order за 5 минут отвечают 5xx, или ни одна реплика api
+              не отдаёт метрики (тогда значение 100%: ошибки посчитать не из чего, а пользователи не получают ответа).
+              Дольше {{ $a.sloErrorFor }}. Чаще всего это недоступный Postgres (503 «database unavailable»):
+              kubectl get cluster -n {{ $ns }}; kubectl get pods -n {{ $ns }} -l app.kubernetes.io/name=api.
+
+        - alert: ShopCriticalPathRestarts
+          expr: |
+            sum by (pod, container) (increase(kube_pod_container_status_restarts_total{namespace="{{ $ns }}", container=~"api|postgres"}[{{ $a.restartsWindow }}])) > 0
+          labels:
+            severity: critical
+            service: "{{`{{ $labels.container }}`}}"
+            namespace: {{ $ns }}
+          annotations:
+            summary: "{{`{{ $labels.container }}`}}: контейнер в {{`{{ $labels.pod }}`}} перезапущен за {{ $a.restartsWindow }}"
+            description: >-
+              Контейнер критического пути перезапущен на месте: под тот же, счётчик restartCount вырос.
+              Rollout и удаление пода сюда не попадают (новый под начинает счётчик с нуля), так что это
+              liveness, OOMKilled или падение процесса. kubectl describe pod {{`{{ $labels.pod }}`}} -n {{ $ns }}
+              → Last State. Liveness при медленной базе — признак каскада: проверь Postgres.
+{{- end }}

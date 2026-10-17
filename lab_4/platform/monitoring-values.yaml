@@ -1,0 +1,63 @@
+commonLabels:
+  team: monitoring
+
+prometheusOperator:
+  podLabels:
+    team: monitoring
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 200m, memory: 256Mi}
+  prometheusConfigReloader:
+    resources:
+      requests: {cpu: 10m, memory: 25Mi}
+      limits: {cpu: 100m, memory: 64Mi}
+  admissionWebhooks:
+    patch:
+      resources:
+        requests: {cpu: 10m, memory: 32Mi}
+        limits: {cpu: 100m, memory: 64Mi}
+
+prometheus:
+  prometheusSpec:
+    podMetadata:
+      labels:
+        team: monitoring
+    resources:
+      requests: {cpu: 100m, memory: 400Mi}
+      limits: {cpu: "1", memory: 1Gi}
+
+alertmanager:
+  alertmanagerSpec:
+    podMetadata:
+      labels:
+        team: monitoring
+    resources:
+      requests: {cpu: 10m, memory: 32Mi}
+      limits: {cpu: 100m, memory: 128Mi}
+
+grafana:
+  defaultDashboardsEnabled: false
+  podLabels:
+    team: monitoring
+  resources:
+    requests: {cpu: 50m, memory: 256Mi}
+    limits: {cpu: "1", memory: 768Mi}
+  sidecar:
+    resources:
+      requests: {cpu: 10m, memory: 64Mi}
+      limits: {cpu: 100m, memory: 128Mi}
+
+kube-state-metrics:
+  customLabels:
+    team: monitoring
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {cpu: 100m, memory: 128Mi}
+
+prometheus-node-exporter:
+  podLabels:
+    jobLabel: node-exporter
+    team: monitoring
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {cpu: 200m, memory: 64Mi}
