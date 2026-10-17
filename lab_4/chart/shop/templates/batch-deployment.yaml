@@ -6,6 +6,11 @@ metadata:
     {{- include "shop.labels" (dict "root" . "name" "batch") | nindent 4 }}
 spec:
   replicas: {{ .Values.batch.replicas }}
+  strategy:
+    type: {{ .Values.batch.strategy }}
+    {{- if eq .Values.batch.strategy "Recreate" }}
+    rollingUpdate: null
+    {{- end }}
   selector:
     matchLabels:
       {{- include "shop.selectorLabels" (dict "root" . "name" "batch") | nindent 6 }}

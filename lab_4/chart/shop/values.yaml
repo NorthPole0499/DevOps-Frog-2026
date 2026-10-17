@@ -50,6 +50,7 @@ batch:
     repository: registry.shop.local/shop/batch
     tag: "0.1.0"
     pullPolicy: IfNotPresent
+  strategy: Recreate
   terminationGracePeriodSeconds: 5
   priorityClass: batch-low
   load:
