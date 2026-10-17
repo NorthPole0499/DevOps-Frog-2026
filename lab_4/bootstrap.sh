@@ -5,10 +5,11 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 CLUSTER="${CLUSTER:-lab4}"
 NODE_IMAGE="kindest/node:v1.35.1"
 NODE_CPUS="${NODE_CPUS:-3}"
-CP_MEMORY="${CP_MEMORY:-3072}"
-CP_RESERVED_MEMORY="${CP_RESERVED_MEMORY:-2048}"
-WORKER_MEMORY="${WORKER_MEMORY:-2560}"
-WORKER_RESERVED_MEMORY="${WORKER_RESERVED_MEMORY:-512}"
+CP_MEMORY="${CP_MEMORY:-2688}"
+CP_RESERVED_MEMORY="${CP_RESERVED_MEMORY:-1664}"
+WORKER_MEMORY="${WORKER_MEMORY:-2432}"
+WORKER_RESERVED_MEMORY="${WORKER_RESERVED_MEMORY:-384}"
+VM_HEADROOM_MEMORY="${VM_HEADROOM_MEMORY:-768}"
 REGISTRY="registry.shop.local/shop"
 KYVERNO_CHART_VERSION="3.9.1"
 CNPG_CHART_VERSION="0.29.1"
@@ -65,8 +66,8 @@ if kind get clusters 2>/dev/null | grep -qx "${CLUSTER}"; then
 else
   host_memory=$(( $(docker info --format '{{.MemTotal}}') / 1048576 ))
   reserved_cpus=$(( $(docker info --format '{{.NCPU}}') - NODE_CPUS ))
-  if [ $(( CP_MEMORY + WORKER_MEMORY )) -ge "${host_memory}" ]; then
-    echo "бюджеты нод (${CP_MEMORY} + ${WORKER_MEMORY} МБ) не помещаются в Docker VM (${host_memory} МБ)"; exit 1
+  if [ $(( CP_MEMORY + WORKER_MEMORY + VM_HEADROOM_MEMORY )) -gt "${host_memory}" ]; then
+    echo "бюджеты нод (${CP_MEMORY} + ${WORKER_MEMORY} МБ) + запас VM (${VM_HEADROOM_MEMORY} МБ) не помещаются в Docker VM (${host_memory} МБ)"; exit 1
   fi
   kind_config > "${ROOT}/platform/kind.generated.yaml"
   kind create cluster --name "${CLUSTER}" --config "${ROOT}/platform/kind.generated.yaml"
