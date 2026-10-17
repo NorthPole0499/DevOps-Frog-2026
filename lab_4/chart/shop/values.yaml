@@ -11,7 +11,7 @@ priorityClasses:
     description: "Фоновая нагрузка: ниже всех подов без класса, никого не вытесняет"
 
 api:
-  replicas: 3
+  replicas: 4
   image:
     repository: registry.shop.local/shop/api
     tag: "0.3.0"
@@ -58,7 +58,7 @@ batch:
     cpuWorkers: 1
   resources:
     requests: {cpu: 100m, memory: 128Mi}
-    limits: {cpu: 500m, memory: 384Mi}
+    limits: {cpu: 200m, memory: 384Mi}
 
 postgres:
   instances: 1
@@ -68,8 +68,8 @@ postgres:
   pdb:
     enabled: true
   resources:
-    requests: {cpu: 500m, memory: 256Mi}
-    limits: {cpu: 500m, memory: 256Mi}
+    requests: {cpu: "1", memory: 256Mi}
+    limits: {cpu: "1", memory: 256Mi}
 
 db:
   host: shop-postgres-rw
