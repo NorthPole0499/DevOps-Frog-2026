@@ -1,0 +1,14 @@
+FROM python:3.12-slim
+
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION} \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+COPY batch.py .
+
+USER 10001
+
+CMD ["python", "-u", "batch.py"]
+

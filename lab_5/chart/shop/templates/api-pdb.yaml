@@ -1,0 +1,14 @@
+{{- if .Values.api.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api
+  labels:
+    {{- include "shop.labels" (dict "root" . "name" "api") | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.api.pdb.maxUnavailable }}
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels:
+      {{- include "shop.selectorLabels" (dict "root" . "name" "api") | nindent 6 }}
+{{- end }}

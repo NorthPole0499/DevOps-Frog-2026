@@ -1,0 +1,91 @@
+team: shop
+
+priorityClasses:
+  critical:
+    value: 1000000
+    preemptionPolicy: PreemptLowerPriority
+    description: "Критический путь заказа (api, postgres): вытесняет менее важные поды"
+  batch-low:
+    value: -1000
+    preemptionPolicy: Never
+    description: "Фоновая нагрузка: ниже всех подов без класса, никого не вытесняет"
+
+api:
+  replicas: 4
+  image:
+    repository: registry.shop.local/shop/api
+    tag: "0.3.0"
+    pullPolicy: IfNotPresent
+  healthFail: false
+  preStopSleepSeconds: 5
+  terminationGracePeriodSeconds: 30
+  spread:
+    mode: topologySpreadConstraints
+    topologyKey: kubernetes.io/hostname
+    strict: true
+    maxSkew: 1
+  priorityClass: critical
+  pdb:
+    enabled: true
+    maxUnavailable: 1
+  resources:
+    requests: {cpu: 300m, memory: 75Mi}
+    limits: {cpu: 300m, memory: 75Mi}
+
+worker:
+  replicas: 2
+  image:
+    repository: registry.shop.local/shop/worker
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  healthFail: false
+  priorityClass: ""
+  resources:
+    requests: {cpu: 10m, memory: 37Mi}
+    limits: {cpu: 150m, memory: 37Mi}
+
+batch:
+  replicas: 1
+  image:
+    repository: registry.shop.local/shop/batch
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  strategy: Recreate
+  terminationGracePeriodSeconds: 5
+  priorityClass: batch-low
+  load:
+    memoryMb: 200
+    cpuWorkers: 1
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 200m, memory: 384Mi}
+
+postgres:
+  instances: 1
+  storage:
+    size: 1Gi
+  priorityClass: critical
+  pdb:
+    enabled: true
+  resources:
+    requests: {cpu: "1", memory: 256Mi}
+    limits: {cpu: "1", memory: 256Mi}
+
+db:
+  host: shop-postgres-rw
+  port: "5432"
+  name: app
+  user: app
+  passwordSecret: shop-postgres-app
+
+monitoring:
+  enabled: true
+  releaseLabel: monitoring
+  interval: 15s
+  dashboard: true
+  alerts:
+    sloLatencySeconds: 0.1
+    sloLatencyFor: 2m
+    sloErrorRatio: 0.01
+    sloErrorFor: 2m
+    restartsWindow: 15m

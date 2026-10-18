@@ -1,0 +1,105 @@
+rule_files: [rules.yaml]
+evaluation_interval: 15s
+
+tests:
+  - name: latency above SLA fires after 2m
+    interval: 15s
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{namespace="shop",job="api",pod="a",method="POST",path="/order",le="0.1"}'
+        values: '0+5x40'
+      - series: 'http_request_duration_seconds_bucket{namespace="shop",job="api",pod="a",method="POST",path="/order",le="0.25"}'
+        values: '0+10x40'
+      - series: 'http_request_duration_seconds_bucket{namespace="shop",job="api",pod="a",method="POST",path="/order",le="+Inf"}'
+        values: '0+10x40'
+    promql_expr_test:
+      - expr: round(shop:order_latency_p95:rate5m * 1000)
+        eval_time: 5m
+        exp_samples:
+          - {labels: '{}', value: 235}
+    alert_rule_test:
+      - {eval_time: 1m, alertname: ShopOrderLatencySLOBreach, exp_alerts: []}
+      - eval_time: 4m
+        alertname: ShopOrderLatencySLOBreach
+        exp_alerts:
+          - exp_labels: {severity: warning, service: api, namespace: shop}
+            exp_annotations:
+              summary: "SLA по задержке нарушен: p95 POST /order = 235ms"
+              description: "p95 создания заказа за 5 минут выше 100 мс дольше 2m. Заказы проходят, но медленно. Частые причины: CPU-троттлинг postgres или api (панель «CPU: доля троттлинга»), сосед по CPU (batch), медленная база. Дашборд: /d/shop-overview, строка «SLA под перегрузкой»."
+
+  - name: latency within SLA and slow GET /orders do not fire
+    interval: 15s
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{namespace="shop",job="api",pod="a",method="POST",path="/order",le="0.025"}'
+        values: '0+10x40'
+      - series: 'http_request_duration_seconds_bucket{namespace="shop",job="api",pod="a",method="POST",path="/order",le="+Inf"}'
+        values: '0+10x40'
+      - series: 'http_request_duration_seconds_bucket{namespace="shop",job="api",pod="a",method="GET",path="/orders",le="+Inf"}'
+        values: '0+10x40'
+    alert_rule_test:
+      - {eval_time: 6m, alertname: ShopOrderLatencySLOBreach, exp_alerts: []}
+
+  - name: 5xx on POST /order above 1% fires, errors on other paths do not count
+    interval: 15s
+    input_series:
+      - series: 'up{namespace="shop",job="api",pod="a"}'
+        values: '1x40'
+      - series: 'http_requests_total{namespace="shop",job="api",pod="a",method="POST",path="/order",status="201"}'
+        values: '0+10x40'
+      - series: 'http_requests_total{namespace="shop",job="api",pod="a",method="POST",path="/order",status="503"}'
+        values: '0+1x40'
+      - series: 'http_requests_total{namespace="shop",job="api",pod="a",method="GET",path="/orders",status="503"}'
+        values: '0+50x40'
+    alert_rule_test:
+      - {eval_time: 1m, alertname: ShopOrderErrorSLOBreach, exp_alerts: []}
+      - eval_time: 4m
+        alertname: ShopOrderErrorSLOBreach
+        exp_alerts:
+          - exp_labels: {severity: critical, service: api, namespace: shop}
+            exp_annotations:
+              summary: "SLA по ошибкам нарушен: заказы не создаются (9.091%)"
+              description: "Больше 1% POST /order за 5 минут отвечают 5xx, или ни одна реплика api не отдаёт метрики (тогда значение 100%: ошибки посчитать не из чего, а пользователи не получают ответа). Дольше 2m. Чаще всего это недоступный Postgres (503 «database unavailable»): kubectl get cluster -n shop; kubectl get pods -n shop -l app.kubernetes.io/name=api."
+
+  - name: api fully down fires the error alert through absent()
+    interval: 15s
+    input_series:
+      - series: 'up{namespace="shop",job="api",pod="a"}'
+        values: '1x8 0x30'
+    alert_rule_test:
+      - {eval_time: 2m, alertname: ShopOrderErrorSLOBreach, exp_alerts: []}
+      - eval_time: 5m
+        alertname: ShopOrderErrorSLOBreach
+        exp_alerts:
+          - exp_labels: {severity: critical, service: api, namespace: shop}
+            exp_annotations:
+              summary: "SLA по ошибкам нарушен: заказы не создаются (100%)"
+              description: "Больше 1% POST /order за 5 минут отвечают 5xx, или ни одна реплика api не отдаёт метрики (тогда значение 100%: ошибки посчитать не из чего, а пользователи не получают ответа). Дольше 2m. Чаще всего это недоступный Postgres (503 «database unavailable»): kubectl get cluster -n shop; kubectl get pods -n shop -l app.kubernetes.io/name=api."
+
+  - name: no traffic and api up is silent
+    interval: 15s
+    input_series:
+      - series: 'up{namespace="shop",job="api",pod="a"}'
+        values: '1x40'
+    alert_rule_test:
+      - {eval_time: 6m, alertname: ShopOrderErrorSLOBreach, exp_alerts: []}
+
+  - name: in-place restart of api fires; new pod, worker and batch restarts do not
+    interval: 15s
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="shop",pod="api-a",container="api"}'
+        values: '0x10 1x30'
+      - series: 'kube_pod_container_status_restarts_total{namespace="shop",pod="api-new",container="api"}'
+        values: '_x10 0x30'
+      - series: 'kube_pod_container_status_restarts_total{namespace="shop",pod="worker-a",container="worker"}'
+        values: '0x10 3x30'
+      - series: 'kube_pod_container_status_restarts_total{namespace="shop",pod="batch-a",container="batch"}'
+        values: '0x10 5x30'
+    alert_rule_test:
+      - {eval_time: 2m, alertname: ShopCriticalPathRestarts, exp_alerts: []}
+      - eval_time: 4m
+        alertname: ShopCriticalPathRestarts
+        exp_alerts:
+          - exp_labels: {severity: critical, service: api, namespace: shop, pod: api-a, container: api}
+            exp_annotations:
+              summary: "api: контейнер в api-a перезапущен за 15m"
+              description: "Контейнер критического пути перезапущен на месте: под тот же, счётчик restartCount вырос. Rollout и удаление пода сюда не попадают (новый под начинает счётчик с нуля), так что это liveness, OOMKilled или падение процесса. kubectl describe pod api-a -n shop → Last State. Liveness при медленной базе — признак каскада: проверь Postgres."
+      - {eval_time: 20m, alertname: ShopCriticalPathRestarts, exp_alerts: []}
