@@ -30,7 +30,7 @@ pgrep -af api.py
 ps -o pid,ppid,user,%cpu,%mem,cmd -p <PID>
 ```
 
-скрин с командой и выводом
+![PID и PPID процесса](./img/Screenshot%202026-09-27%20230046.png)
 
 ## Этап 2
 
@@ -81,9 +81,7 @@ echo $$
 
 Таким образом удалось убедиться, что namespaces позволяют изолировать PID, hostname, сеть и пользователей процесса.
 
-скрин с PID 1 и hostname `my-container`
-
-скрин с user namespace
+![Проверка namespaces](./img/Screenshot%202026-09-27%20231258.png)
 
 
 ## Этап 3. Cgroups v2
@@ -133,7 +131,7 @@ cat /sys/fs/cgroup/lab1/memory.events
 
 В результате счётчики `oom` и `oom_kill` увеличились. Это означает, что ограничение памяти действительно сработало и процесс был завершён механизмом OOM.
 
-скрин `memory.max` и `memory.events` после OOM
+![Ограничение памяти через cgroups](./img/Screenshot%202026-10-19%20215305.png)
 
 
 ### Ограничение CPU и количества процессов
@@ -161,7 +159,7 @@ cat /sys/fs/cgroup/lab1/cpu.stat
 ```
 
 
-скрин `cpu.max` и `cpu.stat`
+![Ограничение CPU и throttling](./img/Screenshot%202026-10-19%20220325.png)
 
 
 
@@ -186,7 +184,7 @@ cat /sys/fs/cgroup/lab1/pids.current
 cat /sys/fs/cgroup/lab1/pids.events
 ```
 
-скрин проверки `pids.max` и `pids.events`
+![Ограничение количества процессов](./img/Screenshot%202026-10-19%20220752.png)
 
 
 ## Этап 4
@@ -226,7 +224,7 @@ PermissionError: [Errno 1] Operation not permitted
 При этом остальные разрешенные системные вызовы продолжали работать корректео
 
 
-скрин ошибки `Operation not permitted`
+![Проверка seccomp](./img/Screenshot%202026-10-19%20224142.png)
 
 
 ## Этап 5
@@ -261,7 +259,7 @@ CAP_SYS_MODULE
 
 Так мы собрали упрощенный контейнер которые до этого проверяли отдельно
 
-скрин запуска `mydocker.sh` с PID, hostname и лимитами
+![Запуск собственного контейнера mydocker.sh](./img/Screenshot%202026-10-19%20224556.png)
 
 
 
@@ -307,7 +305,7 @@ FROM python:3.14-slim
 docker images lab1-api
 ```
 
-скрин сравнения Docker images
+![Docker и multi-stage build](./img/Screenshot%202026-10-20%20002133.png)
 
 
 ### Docker Volumes
@@ -329,8 +327,6 @@ docker volume create lab1-data
 Volume подключался к контейнеру в директорию `/data`. После создания файла в `/data`, удаления контейнера и запуска нового контейнера с тем же volume данные сохранились.
 
 Таким образом Docker volumes позволяют хранить данные независимо от контейнера
-
-скрин проверки временного файла и Docker volume
 
 
 ## Этап 7
@@ -354,7 +350,9 @@ runsc
 
 Таким образом контейнер был успешно запущен с использованием gVisor вместо стандартного Docker runtime.
 
-скрин `docker inspect`, где видно `runsc`
+![Запуск контейнера через gVisor](./img/Screenshot%202026-10-20%20170132.png)
+
+![Проверка runtime runsc](./img/Screenshot%202026-10-20%20171401.png)
 
 
 ## Этап 8
@@ -386,7 +384,7 @@ cadvisor
 
 Оба источника находились в состоянии `UP`, то есть Prometheus успешно получал данные.
 
-скрин Prometheus Targets
+![Prometheus Targets](./img/Screenshot%202026-10-20%20173626.png)
 
 ### Grafana
 
@@ -445,7 +443,7 @@ timeout 20s curl http://localhost:8080/burn
 
 На графиек видно увеличение всех показателей
 
-скрин итогового dashboard Grafana с Memory Usage, CPU Usage и CPU Throttling
+![Grafana dashboard](./img/Screenshot%202026-10-20%20183634.png)
 
 ### Ужас работы через ВМ
 
