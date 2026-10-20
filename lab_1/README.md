@@ -16,7 +16,7 @@
 ```bash
 curl http://localhost:8080/health
 ```
-скрин сервиса в браузере
+![Проверка работы API](./img/Screenshot%202026-09-27%20225215.png)
 
 ## Этап 1 
 
