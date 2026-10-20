@@ -45,7 +45,7 @@ worker:
     limits: {cpu: 150m, memory: 37Mi}
 
 batch:
-  replicas: 1
+  replicas: 0
   image:
     repository: registry.shop.local/shop/batch
     tag: "0.1.0"

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-CLUSTER="${CLUSTER:-lab4}"
+CLUSTER="${CLUSTER:-lab5}"
 NODE_IMAGE="kindest/node:v1.35.1"
 NODE_CPUS="${NODE_CPUS:-3}"
 CP_MEMORY="${CP_MEMORY:-2688}"
@@ -15,6 +15,7 @@ KYVERNO_CHART_VERSION="3.9.1"
 CNPG_CHART_VERSION="0.29.1"
 KPS_CHART_VERSION="91.5.2"
 METRICS_SERVER_CHART_VERSION="3.14.0"
+CILIUM_CHART_VERSION="1.20.3"
 LAB2="${ROOT}/../lab_2"
 VALUES="${ROOT}/chart/shop/values.yaml"
 
@@ -33,6 +34,11 @@ kind_config() {
   cat <<EOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  disableDefaultCNI: true
+  kubeProxyMode: iptables
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
 nodes:
   - role: control-plane
     image: ${NODE_IMAGE}
@@ -73,6 +79,21 @@ else
   kind create cluster --name "${CLUSTER}" --config "${ROOT}/platform/kind.generated.yaml"
 fi
 kubectl config use-context "kind-${CLUSTER}" >/dev/null
+
+step "CNI: Cilium (chart ${CILIUM_CHART_VERSION}) + Hubble"
+kubectl get nodes
+helm repo add cilium https://helm.cilium.io/ >/dev/null 2>&1 || true
+helm repo update cilium >/dev/null
+helm upgrade --install cilium cilium/cilium \
+  --version "${CILIUM_CHART_VERSION}" \
+  -n kube-system \
+  -f "${ROOT}/platform/cilium-values.yaml"
+kubectl rollout status -n kube-system ds/cilium --timeout=600s
+kubectl rollout status -n kube-system deploy/cilium-operator --timeout=300s
+kubectl wait --for=condition=Ready node --all --timeout=300s
+kubectl rollout status -n kube-system deploy/coredns --timeout=300s
+kubectl rollout status -n kube-system deploy/hubble-relay --timeout=300s
+kubectl exec -n kube-system ds/cilium -c cilium-agent -- cilium-dbg status --brief
 kubectl get nodes -o wide
 kubectl get nodes -o custom-columns='NAME:.metadata.name,CAPACITY:.status.capacity.memory,ALLOCATABLE:.status.allocatable.memory,CPU:.status.allocatable.cpu,TAINTS:.spec.taints[*].key'
 
@@ -84,26 +105,28 @@ helm upgrade --install metrics-server metrics-server/metrics-server \
   -n kube-system \
   --set 'args={--kubelet-insecure-tls}'
 
-step "Kyverno (chart ${KYVERNO_CHART_VERSION})"
-helm repo add kyverno https://kyverno.github.io/kyverno/ >/dev/null 2>&1 || true
-helm repo update kyverno >/dev/null
-helm upgrade --install kyverno kyverno/kyverno \
-  --version "${KYVERNO_CHART_VERSION}" \
-  -n kyverno --create-namespace \
-  --set backgroundController.enabled=false \
-  --set cleanupController.enabled=false \
-  --set reportsController.enabled=false \
-  --set features.policyExceptions.enabled=true \
-  --set features.policyExceptions.namespace=kyverno
-kubectl rollout status -n kyverno deploy/kyverno-admission-controller --timeout=600s
+if [ "${WITH_KYVERNO:-0}" = "1" ]; then
+  step "Kyverno (chart ${KYVERNO_CHART_VERSION})"
+  helm repo add kyverno https://kyverno.github.io/kyverno/ >/dev/null 2>&1 || true
+  helm repo update kyverno >/dev/null
+  helm upgrade --install kyverno kyverno/kyverno \
+    --version "${KYVERNO_CHART_VERSION}" \
+    -n kyverno --create-namespace \
+    --set backgroundController.enabled=false \
+    --set cleanupController.enabled=false \
+    --set reportsController.enabled=false \
+    --set features.policyExceptions.enabled=true \
+    --set features.policyExceptions.namespace=kyverno
+  kubectl rollout status -n kyverno deploy/kyverno-admission-controller --timeout=600s
 
-step "Политики"
-for i in $(seq 1 12); do
-  if kubectl apply -f "${ROOT}/policies/" 2>/dev/null; then break; fi
-  [ "$i" = 12 ] && { kubectl apply -f "${ROOT}/policies/"; exit 1; }
-  echo "Kyverno ещё не готов принимать политики, ждём..."; sleep 5
-done
-kubectl wait --for=condition=Ready clusterpolicy --all --timeout=120s
+  step "Политики"
+  for i in $(seq 1 12); do
+    if kubectl apply -f "${ROOT}/policies/" 2>/dev/null; then break; fi
+    [ "$i" = 12 ] && { kubectl apply -f "${ROOT}/policies/"; exit 1; }
+    echo "Kyverno ещё не готов принимать политики, ждём..."; sleep 5
+  done
+  kubectl wait --for=condition=Ready clusterpolicy --all --timeout=120s
+fi
 
 step "Оператор CloudNativePG (chart ${CNPG_CHART_VERSION})"
 helm repo add cnpg https://cloudnative-pg.github.io/charts >/dev/null 2>&1 || true
@@ -116,8 +139,10 @@ kubectl rollout status -n cnpg-system deploy/cnpg-cloudnative-pg --timeout=600s
 
 if [ "${SKIP_MONITORING:-0}" != "1" ]; then
   step "Мониторинг из Лабы 2 (kube-prometheus-stack ${KPS_CHART_VERSION})"
-  kubectl apply -f "${ROOT}/policies/exceptions/"
-  sleep 5
+  if [ "${WITH_KYVERNO:-0}" = "1" ]; then
+    kubectl apply -f "${ROOT}/policies/exceptions/"
+    sleep 5
+  fi
   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null 2>&1 || true
   helm repo update prometheus-community >/dev/null
   helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
@@ -147,6 +172,8 @@ fi
 
 if [ "${SKIP_SHOP:-0}" != "1" ]; then
   step "Чарт shop"
+  [ "${WITH_KYVERNO:-0}" = "1" ] && kubectl rollout status -n kyverno deploy/kyverno-admission-controller --timeout=600s
+  kubectl rollout status -n cnpg-system deploy/cnpg-cloudnative-pg --timeout=600s
   shop_args=()
   [ "${SKIP_MONITORING:-0}" = "1" ] && shop_args+=(--set monitoring.enabled=false)
   helm upgrade --install shop "${ROOT}/chart/shop" -n shop --create-namespace --reset-values ${shop_args[@]+"${shop_args[@]}"}
@@ -182,10 +209,12 @@ else:
 fi
 
 step "Готово"
-kubectl get pods -n kyverno
+if [ "${WITH_KYVERNO:-0}" = "1" ]; then
+  kubectl get pods -n kyverno
+  kubectl get clusterpolicy
+  kubectl get policyexception -n kyverno
+fi
 kubectl get pods -n cnpg-system
-kubectl get clusterpolicy
-kubectl get policyexception -n kyverno
 [ "${SKIP_MONITORING:-0}" != "1" ] && kubectl get pods -n monitoring
 if [ "${SKIP_SHOP:-0}" != "1" ]; then
   kubectl get cluster -n shop
