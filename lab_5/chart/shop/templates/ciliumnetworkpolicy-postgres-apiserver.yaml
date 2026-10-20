@@ -1,0 +1,17 @@
+{{- if and .Values.networkPolicy.enabled .Values.networkPolicy.apiServer.enabled }}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: postgres-apiserver
+  labels:
+    {{- include "shop.labels" (dict "root" . "name" "postgres") | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  egress:
+    - toEntities: [kube-apiserver]
+      toPorts:
+        - ports:
+            - {port: {{ .Values.networkPolicy.apiServer.port | quote }}, protocol: TCP}
+{{- end }}

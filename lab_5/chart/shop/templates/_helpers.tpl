@@ -68,3 +68,24 @@ affinity:
 priorityClassName: {{ printf "%s-%s" $.root.Release.Name . }}
 {{- end -}}
 {{- end }}
+
+{{- define "shop.netpol.podSelector" -}}
+podSelector:
+  matchLabels:
+    {{- include "shop.selectorLabels" . | nindent 4 }}
+{{- end }}
+
+{{- define "shop.netpol.peer" -}}
+namespaceSelector:
+  matchLabels:
+    kubernetes.io/metadata.name: {{ .namespace }}
+podSelector:
+  matchLabels:
+    {{- toYaml .labels | nindent 4 }}
+{{- end }}
+
+{{- define "shop.netpol.postgresSelector" -}}
+podSelector:
+  matchLabels:
+    app.kubernetes.io/name: postgres
+{{- end }}

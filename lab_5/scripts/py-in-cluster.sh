@@ -3,6 +3,8 @@ set -euo pipefail
 
 IMAGE="${TOOLBOX_IMAGE:-registry.shop.local/shop/worker:0.1.0}"
 NAME="${TOOLBOX_NAME:-toolbox-$(date +%s)}"
+LABELS="${TOOLBOX_LABELS:-app.kubernetes.io/name=toolbox,app.kubernetes.io/part-of=shop-tools,team=shop}"
+NAMESPACE="${TOOLBOX_NAMESPACE:-shop}"
 
 overrides="$(python3 - "${NAME}" "${IMAGE}" "$1" <<'PY'
 import json, sys
@@ -23,6 +25,6 @@ print(json.dumps({"spec": {
 PY
 )"
 
-exec kubectl run "${NAME}" -n shop --rm -i --quiet --restart=Never --image="${IMAGE}" \
-  --labels="app.kubernetes.io/name=toolbox,app.kubernetes.io/part-of=shop-tools,team=shop" \
+exec kubectl run "${NAME}" -n "${NAMESPACE}" --rm -i --quiet --restart=Never --image="${IMAGE}" \
+  --labels="${LABELS}" \
   --overrides="${overrides}"

@@ -1,0 +1,22 @@
+{{- if and .Values.networkPolicy.enabled .Values.client.enabled }}
+{{- $np := .Values.networkPolicy }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: client
+  labels:
+    {{- include "shop.labels" (dict "root" . "name" "client") | nindent 4 }}
+spec:
+  {{- include "shop.netpol.podSelector" (dict "root" . "name" "client") | nindent 2 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - {{ include "shop.netpol.peer" $np.prometheus | nindent 10 | trim }}
+      ports:
+        - {port: {{ $np.ports.client }}, protocol: TCP}
+  egress:
+    - to:
+        - {{ include "shop.netpol.podSelector" (dict "root" . "name" "api") | nindent 10 | trim }}
+      ports:
+        - {port: {{ $np.ports.api }}, protocol: TCP}
+{{- end }}

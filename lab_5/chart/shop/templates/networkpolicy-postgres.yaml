@@ -1,0 +1,38 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+{{- $replicated := gt (int .Values.postgres.instances) 1 }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres
+  labels:
+    {{- include "shop.labels" (dict "root" . "name" "postgres") | nindent 4 }}
+spec:
+  {{- include "shop.netpol.postgresSelector" . | nindent 2 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - {{ include "shop.netpol.podSelector" (dict "root" . "name" "api") | nindent 10 | trim }}
+        - {{ include "shop.netpol.podSelector" (dict "root" . "name" "worker") | nindent 10 | trim }}
+      ports:
+        - {port: {{ $np.ports.postgres }}, protocol: TCP}
+    - from:
+        - {{ include "shop.netpol.peer" $np.cnpgOperator | nindent 10 | trim }}
+      ports:
+        - {port: {{ $np.ports.postgresStatus }}, protocol: TCP}
+    {{- if $replicated }}
+    - from:
+        - {{ include "shop.netpol.postgresSelector" . | nindent 10 | trim }}
+      ports:
+        - {port: {{ $np.ports.postgresStatus }}, protocol: TCP}
+        - {port: {{ $np.ports.postgres }}, protocol: TCP}
+    {{- end }}
+  egress:
+    {{- if $replicated }}
+    - to:
+        - {{ include "shop.netpol.postgresSelector" . | nindent 10 | trim }}
+      ports:
+        - {port: {{ $np.ports.postgresStatus }}, protocol: TCP}
+        - {port: {{ $np.ports.postgres }}, protocol: TCP}
+    {{- end }}
+{{- end }}
