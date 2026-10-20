@@ -143,6 +143,7 @@ if [ "${SKIP_MONITORING:-0}" != "1" ]; then
     kubectl apply -f "${ROOT}/policies/exceptions/"
     sleep 5
   fi
+  kubectl apply -f "${ROOT}/platform/monitoring-priority.yaml"
   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null 2>&1 || true
   helm repo update prometheus-community >/dev/null
   helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
@@ -158,7 +159,7 @@ if [ "${SKIP_MONITORING:-0}" != "1" ]; then
 fi
 
 if [ "${SKIP_IMAGES:-0}" != "1" ]; then
-  for svc in api worker batch; do
+  for svc in api worker batch client; do
     versions="$(printf '%s\n' "$(values_tag "${svc}")" ${APP_VERSION:-} | sort -u)"
     [ "${svc}" = api ] && versions="$(printf '%s\n' ${versions} 0.1.0 0.2.0 | sort -u)"
     step "Образы ${svc}: [$(echo ${versions})]"
@@ -182,6 +183,7 @@ if [ "${SKIP_SHOP:-0}" != "1" ]; then
   kubectl rollout status -n shop deploy/api --timeout=300s
   kubectl rollout status -n shop deploy/worker --timeout=300s
   kubectl rollout status -n shop deploy/batch --timeout=300s
+  kubectl rollout status -n shop deploy/client --timeout=300s
 
   if ! kubectl exec -n shop deploy/api -- sh -c 'test -n "$DB_PASSWORD"' 2>/dev/null; then
     echo "Поды стартовали раньше Secret с паролем БД — rollout restart api/worker"

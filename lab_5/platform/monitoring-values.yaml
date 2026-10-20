@@ -19,6 +19,7 @@ prometheusOperator:
 
 prometheus:
   prometheusSpec:
+    priorityClassName: monitoring-critical
     podMetadata:
       labels:
         team: monitoring
@@ -37,6 +38,12 @@ alertmanager:
 
 grafana:
   defaultDashboardsEnabled: false
+  priorityClassName: monitoring-critical
+  deploymentStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   podLabels:
     team: monitoring
   resources:
@@ -48,6 +55,7 @@ grafana:
       limits: {cpu: 100m, memory: 128Mi}
 
 kube-state-metrics:
+  priorityClassName: monitoring-critical
   customLabels:
     team: monitoring
   resources:

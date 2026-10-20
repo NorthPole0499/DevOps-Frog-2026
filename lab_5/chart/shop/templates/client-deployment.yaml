@@ -1,0 +1,37 @@
+{{- if .Values.client.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: client
+  labels:
+    {{- include "shop.labels" (dict "root" . "name" "client") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "shop.selectorLabels" (dict "root" . "name" "client") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "shop.labels" (dict "root" . "name" "client") | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: client
+          image: "{{ .Values.client.image.repository }}:{{ .Values.client.image.tag }}"
+          imagePullPolicy: {{ .Values.client.image.pullPolicy }}
+          ports:
+            - {name: metrics, containerPort: 8080}
+          env:
+            - {name: TARGET, value: {{ printf "http://api.%s.svc.cluster.local:8080" .Release.Namespace | quote }}}
+            - {name: REQUEST, value: {{ .Values.client.request | quote }}}
+            - {name: RPS, value: {{ .Values.client.rps | quote }}}
+            - {name: TIMEOUT, value: {{ .Values.client.timeoutSeconds | quote }}}
+          resources:
+            {{- toYaml .Values.client.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+{{- end }}
