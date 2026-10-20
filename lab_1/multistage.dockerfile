@@ -5,7 +5,7 @@ WORKDIR /build
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-RUN pip install --no-cache-dir flask
+RUN pip install --no-cache-dir flask prometheus-client
 
 FROM python:3.14-slim
 
