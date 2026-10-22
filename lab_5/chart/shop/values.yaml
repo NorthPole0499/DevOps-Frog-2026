@@ -131,3 +131,5 @@ networkPolicy:
     enabled: true
     port: 6443
   nodePortClientCIDRs: ["172.20.0.0/16"]
+  postgresDeny:
+    - fromEndpoints: [{matchLabels: {k8s:io.kubernetes.pod.namespace: other}}]
