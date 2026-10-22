@@ -103,3 +103,81 @@ tests:
               summary: "api: контейнер в api-a перезапущен за 15m"
               description: "Контейнер критического пути перезапущен на месте: под тот же, счётчик restartCount вырос. Rollout и удаление пода сюда не попадают (новый под начинает счётчик с нуля), так что это liveness, OOMKilled или падение процесса. kubectl describe pod api-a -n shop → Last State. Liveness при медленной базе — признак каскада: проверь Postgres."
       - {eval_time: 20m, alertname: ShopCriticalPathRestarts, exp_alerts: []}
+
+  - name: sustained policy drops of one pair fire; matrix burst and other namespaces do not
+    interval: 15s
+    input_series:
+      - series: 'hubble_policy_verdicts_total{action="dropped",source_namespace="shop",source="api",destination_namespace="shop",destination="postgres",direction="egress",match="none",node="a"}'
+        values: '0+1x40'
+      - series: 'hubble_policy_verdicts_total{action="dropped",source_namespace="shop",source="api",destination_namespace="shop",destination="postgres",direction="egress",match="none",node="b"}'
+        values: '0+1x40'
+      - series: 'hubble_policy_verdicts_total{action="dropped",source_namespace="other",source="other",destination_namespace="shop",destination="postgres",direction="ingress",match="none",node="a"}'
+        values: '0 6x39'
+      - series: 'hubble_policy_verdicts_total{action="dropped",source_namespace="kube-system",source="coredns",destination_namespace="kube-system",destination="coredns",direction="ingress",match="none",node="a"}'
+        values: '0+30x40'
+      - series: 'hubble_policy_verdicts_total{action="forwarded",source_namespace="shop",source="client",destination_namespace="shop",destination="api",direction="ingress",match="l3-l4",node="a"}'
+        values: '0+300x40'
+    alert_rule_test:
+      - {eval_time: 1m, alertname: ShopPolicyDropsSurge, exp_alerts: []}
+      - eval_time: 4m
+        alertname: ShopPolicyDropsSurge
+        exp_alerts:
+          - exp_labels: {severity: critical, service: postgres, namespace: shop, source_namespace: shop, source: api, destination_namespace: shop, destination: postgres, direction: egress}
+            exp_annotations:
+              summary: "Политика режет api → postgres (egress): 0.13 дропов/с"
+              description: "Соединения api (shop) → postgres (shop) отбрасываются политикой дольше 2m, чаще 0.1 в секунду. В zero-trust фон дропов около нуля: разовые проверки матрицы порог не пробивают, а постоянный поток — это кто-то упорно ходит туда, куда не пускают. Сверь пару с матрицей: если должно быть Allow — это сломанное правило (порт, селектор, лишний deny), если Deny — ищи, кто ломится. hubble observe -n shop --verdict DROPPED, причина: Policy denied (нет allow) или by denylist (сработал deny)."
+
+  - name: coredns SERVFAIL above 1% fires
+    interval: 15s
+    input_series:
+      - series: 'coredns_dns_responses_total{job="coredns",rcode="NOERROR"}'
+        values: '0+100x40'
+      - series: 'coredns_dns_responses_total{job="coredns",rcode="NXDOMAIN"}'
+        values: '0+300x40'
+      - series: 'coredns_dns_responses_total{job="coredns",rcode="SERVFAIL"}'
+        values: '0+5x40'
+    alert_rule_test:
+      - {eval_time: 3m, alertname: ShopDNSErrors, exp_alerts: []}
+      - eval_time: 7m
+        alertname: ShopDNSErrors
+        exp_alerts:
+          - exp_labels: {severity: warning, service: coredns, namespace: kube-system}
+            exp_annotations:
+              summary: "CoreDNS: 1.235% ответов SERVFAIL/REFUSED"
+              description: "Больше 1% ответов CoreDNS за 5 минут — SERVFAIL или REFUSED, дольше 5m. NXDOMAIN не считается: из-за ndots:5 и search-доменов это нормальный ответ на большинство запросов пода. Резолв ломается у всех сразу, снаружи похоже на любую сетевую аварию. Проверь апстрим и поды: kubectl logs -n kube-system -l k8s-app=kube-dns. Если DNS режет политика, запросы до CoreDNS не доходят и этот алерт молчит — тогда сработает ShopPolicyDropsSurge с адресатом kube-dns."
+
+  - name: coredns with only NOERROR and NXDOMAIN does not fire
+    interval: 15s
+    input_series:
+      - series: 'coredns_dns_responses_total{job="coredns",rcode="NOERROR"}'
+        values: '0+100x40'
+      - series: 'coredns_dns_responses_total{job="coredns",rcode="NXDOMAIN"}'
+        values: '0+900x40'
+    alert_rule_test:
+      - {eval_time: 9m, alertname: ShopDNSErrors, exp_alerts: []}
+
+  - name: api without ready endpoints fires after 3m; postgres-ro without endpoints is ignored
+    interval: 15s
+    input_series:
+      - series: 'kube_endpointslice_info{namespace="shop",endpointslice="api-ab12c"}'
+        values: '1x40'
+      - series: 'kube_endpointslice_info{namespace="shop",endpointslice="shop-postgres-rw-z4k8d"}'
+        values: '1x40'
+      - series: 'kube_endpointslice_info{namespace="shop",endpointslice="shop-postgres-ro-txnjk"}'
+        values: '1x40'
+      - series: 'kube_endpointslice_endpoints{namespace="shop",endpointslice="api-ab12c",address="10.0.0.1",ready="true"}'
+        values: '1x8 stale'
+      - series: 'kube_endpointslice_endpoints{namespace="shop",endpointslice="api-ab12c",address="10.0.0.1",ready="false"}'
+        values: '_x8 1x31'
+      - series: 'kube_endpointslice_endpoints{namespace="shop",endpointslice="shop-postgres-rw-z4k8d",address="10.0.0.2",ready="true"}'
+        values: '1x40'
+    alert_rule_test:
+      - {eval_time: 1m, alertname: ShopServiceNoReadyEndpoints, exp_alerts: []}
+      - {eval_time: 4m, alertname: ShopServiceNoReadyEndpoints, exp_alerts: []}
+      - eval_time: 6m
+        alertname: ShopServiceNoReadyEndpoints
+        exp_alerts:
+          - exp_labels: {severity: critical, service: api, namespace: shop}
+            exp_annotations:
+              summary: "У сервиса api нет ни одного готового эндпоинта"
+              description: "В EndpointSlice сервиса api дольше 3m нет адресов с ready=true: ClusterIP есть, DNS отвечает, а трафику некуда идти. Снаружи похоже на сетевую проблему, но сеть ни при чём — поды не прошли readiness или их нет. kubectl get endpointslice -n shop -l kubernetes.io/service-name=api; kubectl get pods -n shop; kubectl describe pod → Readiness."

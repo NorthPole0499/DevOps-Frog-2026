@@ -100,12 +100,23 @@ monitoring:
   releaseLabel: monitoring
   interval: 15s
   dashboard: true
+  hubble:
+    enabled: true
+    namespace: kube-system
+    labels: {k8s-app: hubble}
+    port: hubble-metrics
   alerts:
     sloLatencySeconds: 0.1
     sloLatencyFor: 2m
     sloErrorRatio: 0.01
     sloErrorFor: 2m
     restartsWindow: 15m
+    policyDropRate: 0.1
+    policyDropFor: 2m
+    dnsErrorRatio: 0.01
+    dnsErrorFor: 5m
+    endpointsServices: [api, shop-postgres-rw]
+    endpointsFor: 3m
 
 networkPolicy:
   enabled: true

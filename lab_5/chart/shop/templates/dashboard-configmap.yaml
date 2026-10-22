@@ -11,4 +11,6 @@ data:
     {{- .Files.Get "dashboards/shop-overview.json" | nindent 4 }}
   shop-chaos.json: |-
     {{- .Files.Get "dashboards/shop-chaos.json" | nindent 4 }}
+  shop-network.json: |-
+    {{- .Files.Get "dashboards/shop-network.json" | nindent 4 }}
 {{- end }}

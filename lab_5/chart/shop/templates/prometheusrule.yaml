@@ -78,4 +78,79 @@ spec:
               Rollout и удаление пода сюда не попадают (новый под начинает счётчик с нуля), так что это
               liveness, OOMKilled или падение процесса. kubectl describe pod {{`{{ $labels.pod }}`}} -n {{ $ns }}
               → Last State. Liveness при медленной базе — признак каскада: проверь Postgres.
+
+    - name: shop.network
+      rules:
+        - record: shop:policy_drops:rate2m
+          expr: |
+            sum by (source_namespace, source, destination_namespace, destination, direction) (
+              rate(hubble_policy_verdicts_total{action="dropped", source_namespace="{{ $ns }}"}[2m])
+              or
+              rate(hubble_policy_verdicts_total{action="dropped", destination_namespace="{{ $ns }}", source_namespace!="{{ $ns }}"}[2m])
+            )
+
+        - record: shop:policy_connections:rate2m
+          expr: |
+            sum by (source_namespace, source, destination_namespace, destination, direction) (
+              rate(hubble_policy_verdicts_total{action="forwarded", source_namespace="{{ $ns }}"}[2m])
+              or
+              rate(hubble_policy_verdicts_total{action="forwarded", destination_namespace="{{ $ns }}", source_namespace!="{{ $ns }}"}[2m])
+            )
+
+        - record: shop:coredns_error_ratio:rate5m
+          expr: |
+            (sum(rate(coredns_dns_responses_total{rcode=~"SERVFAIL|REFUSED"}[5m])) or on() vector(0))
+            /
+            sum(rate(coredns_dns_responses_total[5m]))
+
+        - alert: ShopPolicyDropsSurge
+          expr: shop:policy_drops:rate2m > {{ $a.policyDropRate }}
+          for: {{ $a.policyDropFor }}
+          labels:
+            severity: critical
+            service: "{{`{{ $labels.destination }}`}}"
+            namespace: {{ $ns }}
+          annotations:
+            summary: "Политика режет {{`{{ $labels.source }}`}} → {{`{{ $labels.destination }}`}} ({{`{{ $labels.direction }}`}}): {{`{{ $value | printf \"%.2f\" }}`}} дропов/с"
+            description: >-
+              Соединения {{`{{ $labels.source }}`}} ({{`{{ $labels.source_namespace }}`}}) → {{`{{ $labels.destination }}`}}
+              ({{`{{ $labels.destination_namespace }}`}}) отбрасываются политикой дольше {{ $a.policyDropFor }}, чаще
+              {{ $a.policyDropRate }} в секунду. В zero-trust фон дропов около нуля: разовые проверки матрицы порог не
+              пробивают, а постоянный поток — это кто-то упорно ходит туда, куда не пускают. Сверь пару с матрицей:
+              если должно быть Allow — это сломанное правило (порт, селектор, лишний deny), если Deny — ищи, кто ломится.
+              hubble observe -n {{ $ns }} --verdict DROPPED, причина: Policy denied (нет allow) или by denylist (сработал deny).
+
+        - alert: ShopDNSErrors
+          expr: shop:coredns_error_ratio:rate5m > {{ $a.dnsErrorRatio }}
+          for: {{ $a.dnsErrorFor }}
+          labels:
+            severity: warning
+            service: coredns
+            namespace: kube-system
+          annotations:
+            summary: "CoreDNS: {{`{{ $value | humanizePercentage }}`}} ответов SERVFAIL/REFUSED"
+            description: >-
+              Больше {{ mulf $a.dnsErrorRatio 100 }}% ответов CoreDNS за 5 минут — SERVFAIL или REFUSED, дольше {{ $a.dnsErrorFor }}.
+              NXDOMAIN не считается: из-за ndots:5 и search-доменов это нормальный ответ на большинство запросов пода.
+              Резолв ломается у всех сразу, снаружи похоже на любую сетевую аварию. Проверь апстрим и поды:
+              kubectl logs -n kube-system -l k8s-app=kube-dns. Если DNS режет политика, запросы до CoreDNS не доходят
+              и этот алерт молчит — тогда сработает ShopPolicyDropsSurge с адресатом kube-dns.
+
+        - alert: ShopServiceNoReadyEndpoints
+          expr: |
+            count by (namespace, service) (label_replace(kube_endpointslice_info{namespace="{{ $ns }}", endpointslice=~"({{ join "|" $a.endpointsServices }})-[a-z0-9]+"}, "service", "$1", "endpointslice", "(.+)-[a-z0-9]+"))
+            unless
+            count by (namespace, service) (label_replace(kube_endpointslice_endpoints{namespace="{{ $ns }}", ready="true", endpointslice=~"({{ join "|" $a.endpointsServices }})-[a-z0-9]+"}, "service", "$1", "endpointslice", "(.+)-[a-z0-9]+"))
+          for: {{ $a.endpointsFor }}
+          labels:
+            severity: critical
+            service: "{{`{{ $labels.service }}`}}"
+            namespace: {{ $ns }}
+          annotations:
+            summary: "У сервиса {{`{{ $labels.service }}`}} нет ни одного готового эндпоинта"
+            description: >-
+              В EndpointSlice сервиса {{`{{ $labels.service }}`}} дольше {{ $a.endpointsFor }} нет адресов с ready=true:
+              ClusterIP есть, DNS отвечает, а трафику некуда идти. Снаружи похоже на сетевую проблему, но сеть ни при чём —
+              поды не прошли readiness или их нет. kubectl get endpointslice -n {{ $ns }} -l kubernetes.io/service-name={{`{{ $labels.service }}`}};
+              kubectl get pods -n {{ $ns }}; kubectl describe pod → Readiness.
 {{- end }}
