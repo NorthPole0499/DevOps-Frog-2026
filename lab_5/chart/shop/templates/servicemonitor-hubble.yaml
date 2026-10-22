@@ -1,0 +1,22 @@
+{{- if and .Values.monitoring.enabled .Values.monitoring.hubble.enabled }}
+{{- $h := .Values.monitoring.hubble }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: hubble
+  labels:
+    {{- include "shop.labels" (dict "root" . "name" "hubble") | nindent 4 }}
+    release: {{ .Values.monitoring.releaseLabel | quote }}
+spec:
+  namespaceSelector:
+    matchNames: [{{ $h.namespace }}]
+  selector:
+    matchLabels:
+      {{- toYaml $h.labels | nindent 6 }}
+  endpoints:
+    - port: {{ $h.port }}
+      interval: {{ .Values.monitoring.interval }}
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+{{- end }}

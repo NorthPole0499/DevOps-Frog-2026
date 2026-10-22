@@ -1,0 +1,8 @@
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: monitoring-critical
+value: 2000000
+preemptionPolicy: Never
+globalDefault: false
+description: "Наблюдаемость: поды приложения не вытесняют её, сама она никого не вытесняет"

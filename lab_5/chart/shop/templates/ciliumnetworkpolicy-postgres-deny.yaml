@@ -1,0 +1,20 @@
+{{- if and .Values.networkPolicy.enabled .Values.networkPolicy.postgresDeny }}
+{{- $np := .Values.networkPolicy }}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: postgres-deny
+  labels:
+    {{- include "shop.labels" (dict "root" . "name" "postgres") | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  ingressDeny:
+    {{- range $np.postgresDeny }}
+    - {{ toYaml . | nindent 6 | trim }}
+      toPorts:
+        - ports:
+            - {port: {{ $np.ports.postgres | quote }}, protocol: TCP}
+    {{- end }}
+{{- end }}

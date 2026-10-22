@@ -1,0 +1,146 @@
+team: shop
+
+priorityClasses:
+  critical:
+    value: 1000000
+    preemptionPolicy: PreemptLowerPriority
+    description: "Критический путь заказа (api, postgres): вытесняет менее важные поды"
+  batch-low:
+    value: -1000
+    preemptionPolicy: Never
+    description: "Фоновая нагрузка: ниже всех подов без класса, никого не вытесняет"
+
+api:
+  replicas: 4
+  image:
+    repository: registry.shop.local/shop/api
+    tag: "0.3.0"
+    pullPolicy: IfNotPresent
+  healthFail: false
+  service:
+    type: NodePort
+    nodePort: 30080
+    externalTrafficPolicy: Local
+  preStopSleepSeconds: 5
+  terminationGracePeriodSeconds: 30
+  spread:
+    mode: topologySpreadConstraints
+    topologyKey: kubernetes.io/hostname
+    strict: true
+    maxSkew: 1
+  priorityClass: critical
+  pdb:
+    enabled: true
+    maxUnavailable: 1
+  resources:
+    requests: {cpu: 300m, memory: 75Mi}
+    limits: {cpu: 300m, memory: 75Mi}
+
+worker:
+  replicas: 2
+  image:
+    repository: registry.shop.local/shop/worker
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  healthFail: false
+  priorityClass: ""
+  resources:
+    requests: {cpu: 10m, memory: 37Mi}
+    limits: {cpu: 150m, memory: 37Mi}
+
+batch:
+  replicas: 0
+  image:
+    repository: registry.shop.local/shop/batch
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  strategy: Recreate
+  terminationGracePeriodSeconds: 5
+  priorityClass: batch-low
+  load:
+    memoryMb: 200
+    cpuWorkers: 1
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 200m, memory: 384Mi}
+
+client:
+  enabled: true
+  image:
+    repository: registry.shop.local/shop/client
+    tag: "0.2.0"
+    pullPolicy: IfNotPresent
+  request: version
+  rps: 10
+  timeoutSeconds: 2
+  resources:
+    requests: {cpu: 50m, memory: 32Mi}
+    limits: {cpu: 200m, memory: 64Mi}
+
+postgres:
+  instances: 1
+  storage:
+    size: 1Gi
+  priorityClass: critical
+  pdb:
+    enabled: true
+  resources:
+    requests: {cpu: "1", memory: 256Mi}
+    limits: {cpu: "1", memory: 256Mi}
+
+db:
+  host: shop-postgres-rw
+  port: "5432"
+  name: app
+  user: app
+  passwordSecret: shop-postgres-app
+
+monitoring:
+  enabled: true
+  releaseLabel: monitoring
+  interval: 15s
+  dashboard: true
+  hubble:
+    enabled: true
+    namespace: kube-system
+    labels: {k8s-app: hubble}
+    port: hubble-metrics
+  alerts:
+    sloLatencySeconds: 0.1
+    sloLatencyFor: 2m
+    sloErrorRatio: 0.01
+    sloErrorFor: 2m
+    restartsWindow: 15m
+    policyDropRate: 0.1
+    policyDropFor: 2m
+    dnsErrorRatio: 0.01
+    dnsErrorFor: 5m
+    endpointsServices: [api, shop-postgres-rw]
+    endpointsFor: 3m
+
+networkPolicy:
+  enabled: true
+  ports:
+    api: 8080
+    worker: 8080
+    client: 8080
+    postgres: 5432
+    postgresStatus: 8000
+  dns:
+    namespace: kube-system
+    labels: {k8s-app: kube-dns}
+    ports:
+      - {port: 53, protocol: UDP}
+      - {port: 53, protocol: TCP}
+  prometheus:
+    namespace: monitoring
+    labels: {app.kubernetes.io/name: prometheus}
+  cnpgOperator:
+    namespace: cnpg-system
+    labels: {app.kubernetes.io/name: cloudnative-pg}
+  apiServer:
+    enabled: true
+    port: 6443
+  nodePortClientCIDRs: ["172.20.0.0/16"]
+  postgresDeny:
+    - fromEndpoints: [{matchLabels: {k8s:io.kubernetes.pod.namespace: other}}]

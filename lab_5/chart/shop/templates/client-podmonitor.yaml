@@ -1,0 +1,17 @@
+{{- if and .Values.client.enabled .Values.monitoring.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: client
+  labels:
+    {{- include "shop.labels" (dict "root" . "name" "client") | nindent 4 }}
+    release: {{ .Values.monitoring.releaseLabel | quote }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "shop.selectorLabels" (dict "root" . "name" "client") | nindent 6 }}
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 5s
+{{- end }}

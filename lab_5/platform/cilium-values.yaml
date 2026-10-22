@@ -1,0 +1,49 @@
+kubeProxyReplacement: false
+
+ipam:
+  mode: kubernetes
+
+routingMode: native
+autoDirectNodeRoutes: true
+ipv4NativeRoutingCIDR: 10.244.0.0/16
+enableIPv4Masquerade: true
+bpf:
+  masquerade: true
+
+operator:
+  replicas: 1
+  resources:
+    requests: {cpu: 20m, memory: 64Mi}
+    limits: {cpu: 500m, memory: 192Mi}
+
+envoy:
+  enabled: false
+
+resources:
+  requests: {cpu: 50m, memory: 192Mi}
+  limits: {cpu: "1", memory: 512Mi}
+
+hubble:
+  enabled: true
+  metrics:
+    enabled:
+      - dns:query
+      - drop
+      - tcp
+      - flow
+      - "policy:sourceContext=app|workload-name|pod|reserved-identity;destinationContext=app|workload-name|pod|dns|reserved-identity;labelsContext=source_namespace,destination_namespace"
+  relay:
+    enabled: true
+    resources:
+      requests: {cpu: 10m, memory: 32Mi}
+      limits: {cpu: 200m, memory: 128Mi}
+  ui:
+    enabled: true
+    backend:
+      resources:
+        requests: {cpu: 10m, memory: 32Mi}
+        limits: {cpu: 200m, memory: 128Mi}
+    frontend:
+      resources:
+        requests: {cpu: 10m, memory: 16Mi}
+        limits: {cpu: 100m, memory: 64Mi}

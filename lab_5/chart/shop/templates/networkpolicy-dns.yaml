@@ -1,0 +1,22 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  labels:
+    {{- include "shop.labels" (dict "root" . "name" "allow-dns") | nindent 4 }}
+spec:
+  podSelector:
+    {{- if le (int .Values.postgres.instances) 1 }}
+    matchExpressions:
+      - {key: app.kubernetes.io/name, operator: NotIn, values: [postgres]}
+    {{- else }}
+    {}
+    {{- end }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - {{ include "shop.netpol.peer" .Values.networkPolicy.dns | nindent 10 | trim }}
+      ports:
+        {{- toYaml .Values.networkPolicy.dns.ports | nindent 8 }}
+{{- end }}

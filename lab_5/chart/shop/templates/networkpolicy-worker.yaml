@@ -1,0 +1,22 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: worker
+  labels:
+    {{- include "shop.labels" (dict "root" . "name" "worker") | nindent 4 }}
+spec:
+  {{- include "shop.netpol.podSelector" (dict "root" . "name" "worker") | nindent 2 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - {{ include "shop.netpol.peer" $np.prometheus | nindent 10 | trim }}
+      ports:
+        - {port: {{ $np.ports.worker }}, protocol: TCP}
+  egress:
+    - to:
+        - {{ include "shop.netpol.postgresSelector" . | nindent 10 | trim }}
+      ports:
+        - {port: {{ $np.ports.postgres }}, protocol: TCP}
+{{- end }}

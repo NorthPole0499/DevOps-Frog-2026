@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  labels:
+    {{- include "shop.labels" (dict "root" . "name" "api") | nindent 4 }}
+spec:
+  type: {{ .Values.api.service.type }}
+  {{- if and (ne .Values.api.service.type "ClusterIP") .Values.api.service.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ .Values.api.service.externalTrafficPolicy }}
+  {{- end }}
+  selector:
+    {{- include "shop.selectorLabels" (dict "root" . "name" "api") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      {{- if and (eq .Values.api.service.type "NodePort") .Values.api.service.nodePort }}
+      nodePort: {{ .Values.api.service.nodePort }}
+      {{- end }}

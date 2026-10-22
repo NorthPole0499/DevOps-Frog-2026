@@ -1,0 +1,156 @@
+{{- if .Values.monitoring.enabled }}
+{{- $a := .Values.monitoring.alerts }}
+{{- $ns := .Release.Namespace }}
+{{- $order := printf "namespace=\"%s\", job=\"api\", path=\"/order\"" $ns }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: shop
+  labels:
+    {{- include "shop.labels" (dict "root" . "name" "shop") | nindent 4 }}
+    release: {{ .Values.monitoring.releaseLabel | quote }}
+spec:
+  groups:
+    - name: shop.rules
+      rules:
+        - record: shop:api_http_error_ratio:rate2m
+          expr: |
+            (sum(rate(http_requests_total{namespace="{{ $ns }}", job="api", path!~"/health|/metrics", status=~"5.."}[2m])) or on() vector(0))
+            /
+            sum(rate(http_requests_total{namespace="{{ $ns }}", job="api", path!~"/health|/metrics"}[2m]))
+
+        - record: shop:order_latency_p95:rate5m
+          expr: |
+            histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{ {{- $order -}} }[5m])))
+
+        - record: shop:order_error_ratio:rate5m
+          expr: |
+            (sum(rate(http_requests_total{ {{- $order -}}, status=~"5.."}[5m])) or on() vector(0))
+            /
+            sum(rate(http_requests_total{ {{- $order -}} }[5m]))
+
+    - name: shop.slo
+      rules:
+        - alert: ShopOrderLatencySLOBreach
+          expr: shop:order_latency_p95:rate5m > {{ $a.sloLatencySeconds }}
+          for: {{ $a.sloLatencyFor }}
+          labels:
+            severity: warning
+            service: api
+            namespace: {{ $ns }}
+          annotations:
+            summary: "SLA по задержке нарушен: p95 POST /order = {{`{{ $value | humanizeDuration }}`}}"
+            description: >-
+              p95 создания заказа за 5 минут выше {{ mulf $a.sloLatencySeconds 1000 }} мс дольше {{ $a.sloLatencyFor }}.
+              Заказы проходят, но медленно. Частые причины: CPU-троттлинг postgres или api
+              (панель «CPU: доля троттлинга»), сосед по CPU (batch), медленная база.
+              Дашборд: /d/shop-overview, строка «SLA под перегрузкой».
+
+        - alert: ShopOrderErrorSLOBreach
+          expr: |
+            shop:order_error_ratio:rate5m > {{ $a.sloErrorRatio }}
+            or
+            absent(up{namespace="{{ $ns }}", job="api"} == 1)
+          for: {{ $a.sloErrorFor }}
+          labels:
+            severity: critical
+            service: api
+            namespace: {{ $ns }}
+          annotations:
+            summary: "SLA по ошибкам нарушен: заказы не создаются ({{`{{ $value | humanizePercentage }}`}})"
+            description: >-
+              Больше {{ mulf $a.sloErrorRatio 100 }}% POST /order за 5 минут отвечают 5xx, или ни одна реплика api
+              не отдаёт метрики (тогда значение 100%: ошибки посчитать не из чего, а пользователи не получают ответа).
+              Дольше {{ $a.sloErrorFor }}. Чаще всего это недоступный Postgres (503 «database unavailable»):
+              kubectl get cluster -n {{ $ns }}; kubectl get pods -n {{ $ns }} -l app.kubernetes.io/name=api.
+
+        - alert: ShopCriticalPathRestarts
+          expr: |
+            sum by (pod, container) (increase(kube_pod_container_status_restarts_total{namespace="{{ $ns }}", container=~"api|postgres"}[{{ $a.restartsWindow }}])) > 0
+          labels:
+            severity: critical
+            service: "{{`{{ $labels.container }}`}}"
+            namespace: {{ $ns }}
+          annotations:
+            summary: "{{`{{ $labels.container }}`}}: контейнер в {{`{{ $labels.pod }}`}} перезапущен за {{ $a.restartsWindow }}"
+            description: >-
+              Контейнер критического пути перезапущен на месте: под тот же, счётчик restartCount вырос.
+              Rollout и удаление пода сюда не попадают (новый под начинает счётчик с нуля), так что это
+              liveness, OOMKilled или падение процесса. kubectl describe pod {{`{{ $labels.pod }}`}} -n {{ $ns }}
+              → Last State. Liveness при медленной базе — признак каскада: проверь Postgres.
+
+    - name: shop.network
+      rules:
+        - record: shop:policy_drops:rate2m
+          expr: |
+            sum by (source_namespace, source, destination_namespace, destination, direction) (
+              rate(hubble_policy_verdicts_total{action="dropped", source_namespace="{{ $ns }}"}[2m])
+              or
+              rate(hubble_policy_verdicts_total{action="dropped", destination_namespace="{{ $ns }}", source_namespace!="{{ $ns }}"}[2m])
+            )
+
+        - record: shop:policy_connections:rate2m
+          expr: |
+            sum by (source_namespace, source, destination_namespace, destination, direction) (
+              rate(hubble_policy_verdicts_total{action="forwarded", source_namespace="{{ $ns }}"}[2m])
+              or
+              rate(hubble_policy_verdicts_total{action="forwarded", destination_namespace="{{ $ns }}", source_namespace!="{{ $ns }}"}[2m])
+            )
+
+        - record: shop:coredns_error_ratio:rate5m
+          expr: |
+            (sum(rate(coredns_dns_responses_total{rcode=~"SERVFAIL|REFUSED"}[5m])) or on() vector(0))
+            /
+            sum(rate(coredns_dns_responses_total[5m]))
+
+        - alert: ShopPolicyDropsSurge
+          expr: shop:policy_drops:rate2m > {{ $a.policyDropRate }}
+          for: {{ $a.policyDropFor }}
+          labels:
+            severity: critical
+            service: "{{`{{ $labels.destination }}`}}"
+            namespace: {{ $ns }}
+          annotations:
+            summary: "Политика режет {{`{{ $labels.source }}`}} → {{`{{ $labels.destination }}`}} ({{`{{ $labels.direction }}`}}): {{`{{ $value | printf \"%.2f\" }}`}} дропов/с"
+            description: >-
+              Соединения {{`{{ $labels.source }}`}} ({{`{{ $labels.source_namespace }}`}}) → {{`{{ $labels.destination }}`}}
+              ({{`{{ $labels.destination_namespace }}`}}) отбрасываются политикой дольше {{ $a.policyDropFor }}, чаще
+              {{ $a.policyDropRate }} в секунду. В zero-trust фон дропов около нуля: разовые проверки матрицы порог не
+              пробивают, а постоянный поток — это кто-то упорно ходит туда, куда не пускают. Сверь пару с матрицей:
+              если должно быть Allow — это сломанное правило (порт, селектор, лишний deny), если Deny — ищи, кто ломится.
+              hubble observe -n {{ $ns }} --verdict DROPPED, причина: Policy denied (нет allow) или by denylist (сработал deny).
+
+        - alert: ShopDNSErrors
+          expr: shop:coredns_error_ratio:rate5m > {{ $a.dnsErrorRatio }}
+          for: {{ $a.dnsErrorFor }}
+          labels:
+            severity: warning
+            service: coredns
+            namespace: kube-system
+          annotations:
+            summary: "CoreDNS: {{`{{ $value | humanizePercentage }}`}} ответов SERVFAIL/REFUSED"
+            description: >-
+              Больше {{ mulf $a.dnsErrorRatio 100 }}% ответов CoreDNS за 5 минут — SERVFAIL или REFUSED, дольше {{ $a.dnsErrorFor }}.
+              NXDOMAIN не считается: из-за ndots:5 и search-доменов это нормальный ответ на большинство запросов пода.
+              Резолв ломается у всех сразу, снаружи похоже на любую сетевую аварию. Проверь апстрим и поды:
+              kubectl logs -n kube-system -l k8s-app=kube-dns. Если DNS режет политика, запросы до CoreDNS не доходят
+              и этот алерт молчит — тогда сработает ShopPolicyDropsSurge с адресатом kube-dns.
+
+        - alert: ShopServiceNoReadyEndpoints
+          expr: |
+            count by (namespace, service) (label_replace(kube_endpointslice_info{namespace="{{ $ns }}", endpointslice=~"({{ join "|" $a.endpointsServices }})-[a-z0-9]+"}, "service", "$1", "endpointslice", "(.+)-[a-z0-9]+"))
+            unless
+            count by (namespace, service) (label_replace(kube_endpointslice_endpoints{namespace="{{ $ns }}", ready="true", endpointslice=~"({{ join "|" $a.endpointsServices }})-[a-z0-9]+"}, "service", "$1", "endpointslice", "(.+)-[a-z0-9]+"))
+          for: {{ $a.endpointsFor }}
+          labels:
+            severity: critical
+            service: "{{`{{ $labels.service }}`}}"
+            namespace: {{ $ns }}
+          annotations:
+            summary: "У сервиса {{`{{ $labels.service }}`}} нет ни одного готового эндпоинта"
+            description: >-
+              В EndpointSlice сервиса {{`{{ $labels.service }}`}} дольше {{ $a.endpointsFor }} нет адресов с ready=true:
+              ClusterIP есть, DNS отвечает, а трафику некуда идти. Снаружи похоже на сетевую проблему, но сеть ни при чём —
+              поды не прошли readiness или их нет. kubectl get endpointslice -n {{ $ns }} -l kubernetes.io/service-name={{`{{ $labels.service }}`}};
+              kubectl get pods -n {{ $ns }}; kubectl describe pod → Readiness.
+{{- end }}

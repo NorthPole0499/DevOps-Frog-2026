@@ -1,0 +1,183 @@
+rule_files: [rules.yaml]
+evaluation_interval: 15s
+
+tests:
+  - name: latency above SLA fires after 2m
+    interval: 15s
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{namespace="shop",job="api",pod="a",method="POST",path="/order",le="0.1"}'
+        values: '0+5x40'
+      - series: 'http_request_duration_seconds_bucket{namespace="shop",job="api",pod="a",method="POST",path="/order",le="0.25"}'
+        values: '0+10x40'
+      - series: 'http_request_duration_seconds_bucket{namespace="shop",job="api",pod="a",method="POST",path="/order",le="+Inf"}'
+        values: '0+10x40'
+    promql_expr_test:
+      - expr: round(shop:order_latency_p95:rate5m * 1000)
+        eval_time: 5m
+        exp_samples:
+          - {labels: '{}', value: 235}
+    alert_rule_test:
+      - {eval_time: 1m, alertname: ShopOrderLatencySLOBreach, exp_alerts: []}
+      - eval_time: 4m
+        alertname: ShopOrderLatencySLOBreach
+        exp_alerts:
+          - exp_labels: {severity: warning, service: api, namespace: shop}
+            exp_annotations:
+              summary: "SLA по задержке нарушен: p95 POST /order = 235ms"
+              description: "p95 создания заказа за 5 минут выше 100 мс дольше 2m. Заказы проходят, но медленно. Частые причины: CPU-троттлинг postgres или api (панель «CPU: доля троттлинга»), сосед по CPU (batch), медленная база. Дашборд: /d/shop-overview, строка «SLA под перегрузкой»."
+
+  - name: latency within SLA and slow GET /orders do not fire
+    interval: 15s
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{namespace="shop",job="api",pod="a",method="POST",path="/order",le="0.025"}'
+        values: '0+10x40'
+      - series: 'http_request_duration_seconds_bucket{namespace="shop",job="api",pod="a",method="POST",path="/order",le="+Inf"}'
+        values: '0+10x40'
+      - series: 'http_request_duration_seconds_bucket{namespace="shop",job="api",pod="a",method="GET",path="/orders",le="+Inf"}'
+        values: '0+10x40'
+    alert_rule_test:
+      - {eval_time: 6m, alertname: ShopOrderLatencySLOBreach, exp_alerts: []}
+
+  - name: 5xx on POST /order above 1% fires, errors on other paths do not count
+    interval: 15s
+    input_series:
+      - series: 'up{namespace="shop",job="api",pod="a"}'
+        values: '1x40'
+      - series: 'http_requests_total{namespace="shop",job="api",pod="a",method="POST",path="/order",status="201"}'
+        values: '0+10x40'
+      - series: 'http_requests_total{namespace="shop",job="api",pod="a",method="POST",path="/order",status="503"}'
+        values: '0+1x40'
+      - series: 'http_requests_total{namespace="shop",job="api",pod="a",method="GET",path="/orders",status="503"}'
+        values: '0+50x40'
+    alert_rule_test:
+      - {eval_time: 1m, alertname: ShopOrderErrorSLOBreach, exp_alerts: []}
+      - eval_time: 4m
+        alertname: ShopOrderErrorSLOBreach
+        exp_alerts:
+          - exp_labels: {severity: critical, service: api, namespace: shop}
+            exp_annotations:
+              summary: "SLA по ошибкам нарушен: заказы не создаются (9.091%)"
+              description: "Больше 1% POST /order за 5 минут отвечают 5xx, или ни одна реплика api не отдаёт метрики (тогда значение 100%: ошибки посчитать не из чего, а пользователи не получают ответа). Дольше 2m. Чаще всего это недоступный Postgres (503 «database unavailable»): kubectl get cluster -n shop; kubectl get pods -n shop -l app.kubernetes.io/name=api."
+
+  - name: api fully down fires the error alert through absent()
+    interval: 15s
+    input_series:
+      - series: 'up{namespace="shop",job="api",pod="a"}'
+        values: '1x8 0x30'
+    alert_rule_test:
+      - {eval_time: 2m, alertname: ShopOrderErrorSLOBreach, exp_alerts: []}
+      - eval_time: 5m
+        alertname: ShopOrderErrorSLOBreach
+        exp_alerts:
+          - exp_labels: {severity: critical, service: api, namespace: shop}
+            exp_annotations:
+              summary: "SLA по ошибкам нарушен: заказы не создаются (100%)"
+              description: "Больше 1% POST /order за 5 минут отвечают 5xx, или ни одна реплика api не отдаёт метрики (тогда значение 100%: ошибки посчитать не из чего, а пользователи не получают ответа). Дольше 2m. Чаще всего это недоступный Postgres (503 «database unavailable»): kubectl get cluster -n shop; kubectl get pods -n shop -l app.kubernetes.io/name=api."
+
+  - name: no traffic and api up is silent
+    interval: 15s
+    input_series:
+      - series: 'up{namespace="shop",job="api",pod="a"}'
+        values: '1x40'
+    alert_rule_test:
+      - {eval_time: 6m, alertname: ShopOrderErrorSLOBreach, exp_alerts: []}
+
+  - name: in-place restart of api fires; new pod, worker and batch restarts do not
+    interval: 15s
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="shop",pod="api-a",container="api"}'
+        values: '0x10 1x30'
+      - series: 'kube_pod_container_status_restarts_total{namespace="shop",pod="api-new",container="api"}'
+        values: '_x10 0x30'
+      - series: 'kube_pod_container_status_restarts_total{namespace="shop",pod="worker-a",container="worker"}'
+        values: '0x10 3x30'
+      - series: 'kube_pod_container_status_restarts_total{namespace="shop",pod="batch-a",container="batch"}'
+        values: '0x10 5x30'
+    alert_rule_test:
+      - {eval_time: 2m, alertname: ShopCriticalPathRestarts, exp_alerts: []}
+      - eval_time: 4m
+        alertname: ShopCriticalPathRestarts
+        exp_alerts:
+          - exp_labels: {severity: critical, service: api, namespace: shop, pod: api-a, container: api}
+            exp_annotations:
+              summary: "api: контейнер в api-a перезапущен за 15m"
+              description: "Контейнер критического пути перезапущен на месте: под тот же, счётчик restartCount вырос. Rollout и удаление пода сюда не попадают (новый под начинает счётчик с нуля), так что это liveness, OOMKilled или падение процесса. kubectl describe pod api-a -n shop → Last State. Liveness при медленной базе — признак каскада: проверь Postgres."
+      - {eval_time: 20m, alertname: ShopCriticalPathRestarts, exp_alerts: []}
+
+  - name: sustained policy drops of one pair fire; matrix burst and other namespaces do not
+    interval: 15s
+    input_series:
+      - series: 'hubble_policy_verdicts_total{action="dropped",source_namespace="shop",source="api",destination_namespace="shop",destination="postgres",direction="egress",match="none",node="a"}'
+        values: '0+1x40'
+      - series: 'hubble_policy_verdicts_total{action="dropped",source_namespace="shop",source="api",destination_namespace="shop",destination="postgres",direction="egress",match="none",node="b"}'
+        values: '0+1x40'
+      - series: 'hubble_policy_verdicts_total{action="dropped",source_namespace="other",source="other",destination_namespace="shop",destination="postgres",direction="ingress",match="none",node="a"}'
+        values: '0 6x39'
+      - series: 'hubble_policy_verdicts_total{action="dropped",source_namespace="kube-system",source="coredns",destination_namespace="kube-system",destination="coredns",direction="ingress",match="none",node="a"}'
+        values: '0+30x40'
+      - series: 'hubble_policy_verdicts_total{action="forwarded",source_namespace="shop",source="client",destination_namespace="shop",destination="api",direction="ingress",match="l3-l4",node="a"}'
+        values: '0+300x40'
+    alert_rule_test:
+      - {eval_time: 1m, alertname: ShopPolicyDropsSurge, exp_alerts: []}
+      - eval_time: 4m
+        alertname: ShopPolicyDropsSurge
+        exp_alerts:
+          - exp_labels: {severity: critical, service: postgres, namespace: shop, source_namespace: shop, source: api, destination_namespace: shop, destination: postgres, direction: egress}
+            exp_annotations:
+              summary: "Политика режет api → postgres (egress): 0.13 дропов/с"
+              description: "Соединения api (shop) → postgres (shop) отбрасываются политикой дольше 2m, чаще 0.1 в секунду. В zero-trust фон дропов около нуля: разовые проверки матрицы порог не пробивают, а постоянный поток — это кто-то упорно ходит туда, куда не пускают. Сверь пару с матрицей: если должно быть Allow — это сломанное правило (порт, селектор, лишний deny), если Deny — ищи, кто ломится. hubble observe -n shop --verdict DROPPED, причина: Policy denied (нет allow) или by denylist (сработал deny)."
+
+  - name: coredns SERVFAIL above 1% fires
+    interval: 15s
+    input_series:
+      - series: 'coredns_dns_responses_total{job="coredns",rcode="NOERROR"}'
+        values: '0+100x40'
+      - series: 'coredns_dns_responses_total{job="coredns",rcode="NXDOMAIN"}'
+        values: '0+300x40'
+      - series: 'coredns_dns_responses_total{job="coredns",rcode="SERVFAIL"}'
+        values: '0+5x40'
+    alert_rule_test:
+      - {eval_time: 3m, alertname: ShopDNSErrors, exp_alerts: []}
+      - eval_time: 7m
+        alertname: ShopDNSErrors
+        exp_alerts:
+          - exp_labels: {severity: warning, service: coredns, namespace: kube-system}
+            exp_annotations:
+              summary: "CoreDNS: 1.235% ответов SERVFAIL/REFUSED"
+              description: "Больше 1% ответов CoreDNS за 5 минут — SERVFAIL или REFUSED, дольше 5m. NXDOMAIN не считается: из-за ndots:5 и search-доменов это нормальный ответ на большинство запросов пода. Резолв ломается у всех сразу, снаружи похоже на любую сетевую аварию. Проверь апстрим и поды: kubectl logs -n kube-system -l k8s-app=kube-dns. Если DNS режет политика, запросы до CoreDNS не доходят и этот алерт молчит — тогда сработает ShopPolicyDropsSurge с адресатом kube-dns."
+
+  - name: coredns with only NOERROR and NXDOMAIN does not fire
+    interval: 15s
+    input_series:
+      - series: 'coredns_dns_responses_total{job="coredns",rcode="NOERROR"}'
+        values: '0+100x40'
+      - series: 'coredns_dns_responses_total{job="coredns",rcode="NXDOMAIN"}'
+        values: '0+900x40'
+    alert_rule_test:
+      - {eval_time: 9m, alertname: ShopDNSErrors, exp_alerts: []}
+
+  - name: api without ready endpoints fires after 3m; postgres-ro without endpoints is ignored
+    interval: 15s
+    input_series:
+      - series: 'kube_endpointslice_info{namespace="shop",endpointslice="api-ab12c"}'
+        values: '1x40'
+      - series: 'kube_endpointslice_info{namespace="shop",endpointslice="shop-postgres-rw-z4k8d"}'
+        values: '1x40'
+      - series: 'kube_endpointslice_info{namespace="shop",endpointslice="shop-postgres-ro-txnjk"}'
+        values: '1x40'
+      - series: 'kube_endpointslice_endpoints{namespace="shop",endpointslice="api-ab12c",address="10.0.0.1",ready="true"}'
+        values: '1x8 stale'
+      - series: 'kube_endpointslice_endpoints{namespace="shop",endpointslice="api-ab12c",address="10.0.0.1",ready="false"}'
+        values: '_x8 1x31'
+      - series: 'kube_endpointslice_endpoints{namespace="shop",endpointslice="shop-postgres-rw-z4k8d",address="10.0.0.2",ready="true"}'
+        values: '1x40'
+    alert_rule_test:
+      - {eval_time: 1m, alertname: ShopServiceNoReadyEndpoints, exp_alerts: []}
+      - {eval_time: 4m, alertname: ShopServiceNoReadyEndpoints, exp_alerts: []}
+      - eval_time: 6m
+        alertname: ShopServiceNoReadyEndpoints
+        exp_alerts:
+          - exp_labels: {severity: critical, service: api, namespace: shop}
+            exp_annotations:
+              summary: "У сервиса api нет ни одного готового эндпоинта"
+              description: "В EndpointSlice сервиса api дольше 3m нет адресов с ready=true: ClusterIP есть, DNS отвечает, а трафику некуда идти. Снаружи похоже на сетевую проблему, но сеть ни при чём — поды не прошли readiness или их нет. kubectl get endpointslice -n shop -l kubernetes.io/service-name=api; kubectl get pods -n shop; kubectl describe pod → Readiness."
