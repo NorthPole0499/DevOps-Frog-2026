@@ -1,0 +1,57 @@
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: lab8-n8n
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      - GENERIC_TIMEZONE=Europe/Moscow
+      - TZ=Europe/Moscow
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_METRICS=true
+      - N8N_METRICS_INCLUDE_DEFAULT_METRICS=true
+      - N8N_METRICS_INCLUDE_WORKFLOW_ID_LABEL=true
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./pki:/opt/custom-certificates
+      - ./skills:/home/node/.n8n-files/skills:ro
+  mcp-metrics:
+    build: ./mcp/metrics
+    image: lab8-mcp-metrics:latest
+    container_name: lab8-mcp-metrics
+    restart: unless-stopped
+    expose:
+      - "8000"
+  mcp-logs:
+    build: ./mcp/logs
+    image: lab8-mcp-logs:latest
+    container_name: lab8-mcp-logs
+    restart: unless-stopped
+    expose:
+      - "8000"
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: lab8-prometheus
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    container_name: lab8-grafana
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+volumes:
+  n8n_data:
+  prometheus_data:
+  grafana_data:
+

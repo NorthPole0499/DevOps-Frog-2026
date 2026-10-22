@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+pki/
+*.pem
+*.key
+*.cer
+*.crt
+__pycache__/
+*.pyc
+.venv/
+*.db
+*.sqlite*

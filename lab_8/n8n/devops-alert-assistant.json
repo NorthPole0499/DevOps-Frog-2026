@@ -1,0 +1,256 @@
+{
+  "name": "DevOps Alert Assistant",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "95f40f5b-cbb0-4cd5-8095-adb3f2cdfe19",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "31fbbf95-942c-4fd3-bb00-b02e32bd74a8",
+              "name": "alertname",
+              "value": "HighCPUUsage",
+              "type": "string"
+            },
+            {
+              "id": "59dc584b-5147-4477-80e3-d387ecb53242",
+              "name": "severity",
+              "value": "critical",
+              "type": "string"
+            },
+            {
+              "id": "3f1eb29f-6d37-4fa6-aa29-f8b440bc391f",
+              "name": "instance",
+              "value": "web-server-01",
+              "type": "string"
+            },
+            {
+              "id": "ae501780-c372-4c8d-a931-9b77e8726a7b",
+              "name": "cpu_usage",
+              "value": 95,
+              "type": "number"
+            },
+            {
+              "id": "dab34c9e-56f6-4888-bde1-7655dc8d840b",
+              "name": "description",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "6d97680e-c935-4c7b-9fd1-793fc029b6bd",
+              "name": "skill",
+              "value": "={{ $('Extract from File').item.json.data }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        672,
+        0
+      ],
+      "id": "3d08423f-dc58-442d-81c6-9d727fd25777",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Проанализируй DevOps-алерт:\n\nНазвание: {{ $json.alertname }}\nКритичность: {{ $json.severity }}\nСервер: {{ $json.instance }}\nЗагрузка CPU: {{ $json.cpu_usage }}%\nОписание: {{ $json.description }}\n\nОпредели:\n1. Насколько опасна проблема.\n2. Возможные причины возникновения.\n3. Какие проверки необходимо выполнить.\n4. Какие действия рекомендуются DevOps-инженеру.\n\nОтветь на русском языке.\nНе выполняй никаких изменений инфраструктуры.",
+        "options": {
+          "systemMessage": "{{ $json.skill }}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        896,
+        0
+      ],
+      "id": "9ce4900c-8cb9-489c-b7bd-3cf0d128cd05",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "options": {
+          "maxTokens": 1000
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        768,
+        208
+      ],
+      "id": "4ae41dd1-e7e5-4c93-9112-3c9500c6af7b",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "2oIy4HuyVr2ai3Go",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "endpointUrl": "http://mcp-metrics:8000/mcp",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.mcpClientTool",
+      "typeVersion": 1.4,
+      "position": [
+        880,
+        256
+      ],
+      "id": "ddf786f1-7e2d-4cc3-86f3-db677520dcb3",
+      "name": "MCP Metrics"
+    },
+    {
+      "parameters": {
+        "endpointUrl": "http://mcp-logs:8000/mcp",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.mcpClientTool",
+      "typeVersion": 1.4,
+      "position": [
+        992,
+        208
+      ],
+      "id": "3265b338-a360-4f91-a4f1-63fa84ae89d1",
+      "name": "MCP Logs"
+    },
+    {
+      "parameters": {
+        "fileSelector": "/home/node/.n8n-files/skills/alert-triage.md",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        16
+      ],
+      "id": "d68ec0e8-7ed0-43f7-b2b3-cc979b9ee4eb",
+      "name": "Read/Write Files from Disk"
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.2,
+      "position": [
+        448,
+        16
+      ],
+      "id": "6d67483f-89e1-45df-8740-a8273b1cbd2d",
+      "name": "Extract from File"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Read/Write Files from Disk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP Metrics": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP Logs": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read/Write Files from Disk": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "1a790cb7-61dc-442d-96fe-7a998baf5d93",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "0536dc41a722e28bd2c2082e8eefe55d1d166177cc6bab8fa46f075b80a9c62e"
+  },
+  "nodeGroups": [],
+  "id": "cRodNQiI9szQVc6z",
+  "tags": []
+}
