@@ -132,7 +132,7 @@ Prometheus настроен на сбор собственных метрик и
 
 ### Grafana
 
-В Grafana был создан дашборд **DevOps Alert Assistant Monitoring**.
+В Grafana был создан дашборд DevOps Alert Assistant Monitoring
 
 Для визуализации выбраны три показателя
 
