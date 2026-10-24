@@ -1,0 +1,66 @@
+{{- if .Values.monitoring.enabled }}
+{{- $a := .Values.monitoring.alerts }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: shop
+  labels:
+    {{- include "shop.labels" (dict "root" . "name" "shop") | nindent 4 }}
+    release: {{ .Values.monitoring.releaseLabel | quote }}
+spec:
+  groups:
+    - name: shop.rules
+      rules:
+        - record: shop:api_http_error_ratio:rate2m
+          expr: |
+            (sum(rate(http_requests_total{namespace="{{ .Release.Namespace }}", job="api", path!~"/health|/metrics", status=~"5.."}[2m])) or on() vector(0))
+            /
+            sum(rate(http_requests_total{namespace="{{ .Release.Namespace }}", job="api", path!~"/health|/metrics"}[2m]))
+
+    - name: shop.alerts
+      rules:
+        - alert: ShopApiHighErrorRatio
+          expr: shop:api_http_error_ratio:rate2m > {{ $a.apiErrorRatio }}
+          for: {{ $a.apiErrorRatioFor }}
+          labels:
+            severity: critical
+            service: api
+            namespace: {{ .Release.Namespace }}
+          annotations:
+            summary: "api: {{`{{ $value | humanizePercentage }}`}} запросов заканчиваются 5xx"
+            description: >-
+              Больше {{ mulf $a.apiErrorRatio 100 }}% пользовательских запросов к api отвечают 5xx
+              дольше {{ $a.apiErrorRatioFor }}. Чаще всего это недоступный Postgres (api отвечает 503
+              «database unavailable»): kubectl get cluster -n {{ .Release.Namespace }}.
+
+        - alert: ShopApiDown
+          expr: absent(up{namespace="{{ .Release.Namespace }}", job="api"} == 1)
+          for: {{ $a.apiDownFor }}
+          labels:
+            severity: critical
+            service: api
+            namespace: {{ .Release.Namespace }}
+          annotations:
+            summary: "api: ни одна реплика не отдаёт метрики"
+            description: >-
+              Prometheus {{ $a.apiDownFor }} не может снять /metrics ни с одного пода api.
+              Пользователи, скорее всего, не получают ответа вообще; ShopApiHighErrorRatio
+              в этой ситуации молчит — считать долю ошибок не из чего.
+
+        - alert: ShopOrdersNotProcessed
+          expr: |
+            sum(rate(orders_created_total{namespace="{{ .Release.Namespace }}", job="api"}[{{ $a.ordersStuckWindow }}])) > 0
+            unless
+            sum(rate(orders_processed_total{namespace="{{ .Release.Namespace }}", job="worker"}[{{ $a.ordersStuckWindow }}])) > 0
+          for: {{ $a.ordersStuckFor }}
+          labels:
+            severity: warning
+            service: worker
+            namespace: {{ .Release.Namespace }}
+          annotations:
+            summary: "заказы создаются, но worker ни одного не обработал"
+            description: >-
+              За последние {{ $a.ordersStuckWindow }} api создаёт заказы, а worker не обработал ни одного.
+              api при этом здоров и отвечает 201 — проблему видно только по бизнес-метрикам.
+              Проверь kubectl get deploy worker -n {{ .Release.Namespace }} и логи worker.
+{{- end }}
